@@ -26,6 +26,7 @@
 ---
 
 ## 📸 Live Terminal Preview
+<img width="1494" height="1168" alt="image" src="https://github.com/user-attachments/assets/572fb86a-a870-4f69-a55b-662f5e9b59e4" />
 
 ```text
 ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
