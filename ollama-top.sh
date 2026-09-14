@@ -158,7 +158,6 @@ render() {
     echo ""
     echo "${C_CYAN}${SEP_MAIN}${C_RESET}"
     printf "  ${C_YELLOW}OLLAMA-TOP: AI, DATABASE & HARDWARE MONITOR${C_RESET}  |  ${C_GRAY}%s  |  Host: %s${C_RESET}\n" "$now" "$host_name"
-    printf "  ${C_DCYAN}Author: Frank Glück (Glück IT)  |  Web: https://dozent.net  |  GitHub: https://github.com/glueck-it/ollama-top${C_RESET}\n"
     echo "${C_DCYAN}${SEP_SUB}${C_RESET}"
 
     # 1. NVIDIA GPU Sensors (if nvidia-smi available)
@@ -362,7 +361,7 @@ render() {
     fi
 
     echo "${C_CYAN}${SEP_MAIN}${C_RESET}"
-    printf "  ${C_DGRAY}Refresh: %.1fs  |  https://dozent.net  |  https://github.com/glueck-it/ollama-top${C_RESET}\n" "$REFRESH_SEC"
+    printf "  ${C_DGRAY}Frank Glück (Glück IT)  |  https://dozent.net  |  GitHub: glueck-it/ollama-top  |  [R] Reset${C_RESET}\n"
 }
 
 # --- Main Loop ---

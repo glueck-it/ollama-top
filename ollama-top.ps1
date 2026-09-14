@@ -687,7 +687,6 @@ begin {
         Write-Host $mainSep -ForegroundColor Cyan
         Write-Host "  OLLAMA-TOP: AI, DATABASE & HARDWARE MONITOR  " -NoNewline -ForegroundColor Yellow
         Write-Host "|  $now  |  Host: $env:COMPUTERNAME" -ForegroundColor Gray
-        Write-Host "  Author: Frank Gl$([char]0x00FC)ck (Gl$([char]0x00FC)ck IT)  |  Web: https://dozent.net  |  GitHub: glueck-it/ollama-top" -ForegroundColor DarkCyan
         Write-Host $subSep -ForegroundColor DarkCyan
 
         # 1. BATCH JOB PROGRESS BAR (Falls gepiped oder -Total angegeben)
@@ -1052,8 +1051,9 @@ begin {
             }
         }
 
+        $uUml = [string][char]0x00FC
         Write-Host $mainSep -ForegroundColor Cyan
-        Write-Host "  Refresh: $([math]::Round($RefreshMs/1000, 1))s  |  [Leertaste]/[R]: Reset  |  https://dozent.net  |  https://github.com/glueck-it/ollama-top" -ForegroundColor DarkGray
+        Write-Host "  Frank Gl${uUml}ck (Gl${uUml}ck IT)  |  https://dozent.net  |  GitHub: glueck-it/ollama-top  |  [R] Reset" -ForegroundColor DarkGray
     }
 
     Check-KeyboardInput
