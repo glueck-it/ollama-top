@@ -14,7 +14,7 @@ TOTAL_ITEMS=0
 JOB_TITLE="Batch Job"
 WATCH_PORTS=()
 OLLAMA_PORTS=(11434 11435 8000)
-VERSION="1.1.0"
+VERSION="1.2.0"
 WIDTH=108
 
 # Parse arguments
@@ -88,6 +88,11 @@ SESSION_RX=0
 SESSION_TX=0
 PREV_TIME=$(date +%s%N)
 FIRST_NET=1
+FIRST_RENDER=1
+
+# Hide cursor during execution and ensure restoration on exit
+tput civis 2>/dev/null || printf '\033[?25l'
+trap 'tput cnorm 2>/dev/null || printf "\033[?25h"; exit' EXIT INT TERM
 
 format_bytes() {
     local b=$1
@@ -152,7 +157,12 @@ get_network_scope() {
 }
 
 render() {
-    clear
+    if (( FIRST_RENDER == 1 )); then
+        clear
+        FIRST_RENDER=0
+    else
+        printf '\033[H'
+    fi
     local now=$(date +"%H:%M:%S")
     local host_name=$(hostname 2>/dev/null || echo "LinuxHost")
 
@@ -306,7 +316,7 @@ render() {
     local has_ollama=0
     for op in "${OLLAMA_PORTS[@]}"; do
         local ps_json
-        ps_json=$(curl -s --max-time 1 "http://127.0.0.1:$op/api/ps" 2>/dev/null || echo "")
+        ps_json=$(curl -s --connect-timeout 0.2 --max-time 1 "http://127.0.0.1:$op/api/ps" 2>/dev/null || echo "")
         if [[ -n "$ps_json" && "$ps_json" =~ \"name\": ]]; then
             if (( has_ollama == 0 )); then
                 echo ""
@@ -363,6 +373,7 @@ render() {
 
     echo "${C_CYAN}${SEP_MAIN}${C_RESET}"
     printf "  ${C_DGRAY}Frank Glück (Glück IT)  |  https://dozent.net  |  GitHub: glueck-it/ollama-top  |  [R] Reset  |  [Q/X] Exit${C_RESET}\n"
+    printf '\033[J'
 }
 
 # --- Main Loop ---

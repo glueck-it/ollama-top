@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v1.2.0] - 2026-09-14
+
+### Added
+- **Sub-Millisecond Win32 APIs (Windows)**: Replaced high-latency WMI/CIM queries with native Win32 APIs:
+  - `GetSystemTimes` (kernel32.dll) for CPU utilization (1.3 ms vs. 1,270 ms).
+  - `GlobalMemoryStatusEx` (kernel32.dll) for RAM allocation (0.01 ms vs. 28 ms).
+  - `GetExtendedTcpTable` (iphlpapi.dll) for active TCP connections and listening sockets (5 ms vs. 2,970 ms).
+- **100% Flicker-Free Double-Buffered TUI**: Replaced screen-clearing redraws with in-place VT100 cursor repositioning (`\e[H`), single atomic buffer write (`[Console]::Write`), cursor hiding during execution (`CursorVisible = $false`), and automatic EOL/EOS clearing (`\e[K`, `\e[J`).
+- **Pre-Flight Port Listener Verification**: Eliminated blocking 1-second REST timeouts on inactive Ollama ports by verifying listening status via the TCP table.
+
+### Security & Privacy
+- **Sanitized Documentation & Screenshots**: Anonymized all server IP addresses in `README.md` to private LAN subnet and default ports.
+
+---
+
 ## [v1.1.0] - 2026-09-14
 
 ### Added

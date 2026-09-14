@@ -50,7 +50,7 @@
   ACTIVE SERVICES & ENDPOINTS (Database, Cache & AI):
   PORT    SERVICE                 ENDPOINT / TARGET                    SOCKETS  SCOPE / NETWORK             
 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-   5437   PostgreSQL              135.125.180.233:5437                 4 aktiv  Remote WAN / Cloud          
+   5432   PostgreSQL              192.168.1.150:5432                   4 aktiv  Local LAN / On-Premise      
   11435   Ollama (iGPU/Secondary) 127.0.0.1:11435 (iGPU Vulkan)        1 aktiv  Localhost IPC (Loopback)    
   11434   Ollama (NVIDIA/Primary) 127.0.0.1:11434 (RTX 5070 Ti)        1 aktiv  Localhost IPC (Loopback)    
 
@@ -67,10 +67,10 @@
   ACTIVE CLIENTS & PARALLEL WORKERS: [4 parallel verbunden]
       PID  CLIENT        CONNECTED SERVICES / TARGETS                         MEMORY         CPU TIME
 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-    35284  php           PostgreSQL (5437), Ollama (11435)                   37,4 MB           11,6 s
-    41228  php           PostgreSQL (5437)                                   37,8 MB            6,5 s
-    41880  php           Ollama (11434), PostgreSQL (5437)                   42,3 MB            6,6 s
-    43160  php           PostgreSQL (5437)                                   39,9 MB            6,8 s
+    35284  php           PostgreSQL (5432), Ollama (11435)                   37,4 MB           11,6 s
+    41228  php           PostgreSQL (5432)                                   37,8 MB            6,5 s
+    41880  php           Ollama (11434), PostgreSQL (5432)                   42,3 MB            6,6 s
+    43160  php           PostgreSQL (5432)                                   39,9 MB            6,8 s
 
   SYSTEM HEALTH & CONFIG ADVISOR:
 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

@@ -28,21 +28,248 @@ begin {
     $OutputEncoding = [System.Text.Encoding]::UTF8
     $Host.UI.RawUI.WindowTitle = "Universal Live Monitor | $Title"
     
+    # Hide cursor during execution to eliminate flicker and jumping
+    try { [Console]::CursorVisible = $false } catch {}
+
+    # ANSI & VT100 Escape Codes for 100% Flicker-Free Double-Buffered Rendering
+    $e = [char]27
+    $script:cReset   = "$e[0m"
+    $script:cBld     = "$e[1m"
+    $script:cCyan    = "$e[36m"
+    $script:cYellow  = "$e[33m"
+    $script:cGreen   = "$e[32m"
+    $script:cRed     = "$e[31m"
+    $script:cGray    = "$e[90m"
+    $script:cWhite   = "$e[97m"
+    $script:cMag     = "$e[35m"
+    $script:cBlue    = "$e[34m"
+    $script:cDCyan   = "$e[36m"
+    $script:cDGray   = "$e[38;5;240m"
+    $script:cDYell   = "$e[33m"
+    $script:cClrEOL  = "$e[K"
+    $script:cClrEOS  = "$e[J"
+    $script:cHome    = "$e[H"
+
     # Solid block & seamless box drawing characters
     $script:chFull   = [string][char]0x2588 # █ (Progress bar fill)
     $script:chLight  = [string][char]0x2591 # ░ (Progress bar empty)
-    $script:chHBar   = [string][char]0x2500 # ─ (Box drawings light horizontal - gapless!)
-    $script:chDBar   = [string][char]0x2550 # ═ (Box drawings double horizontal - gapless!)
+    $script:chHBar   = [string][char]0x2500 # ─ (Box drawings light horizontal)
+    $script:chDBar   = [string][char]0x2550 # ═ (Box drawings double horizontal)
     $script:chThick  = [string][char]0x2501 # ━ (Box drawings heavy horizontal)
+
+    # High-Performance Win32 APIs for Sub-Millisecond CPU, RAM & Socket Polling
+    if (-not ([System.Management.Automation.PSTypeName]'FastSysInfo').Type) {
+        $csharpCode = @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Net;
+
+public static class FastSysInfo {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct FILETIME {
+        public uint dwLowDateTime;
+        public uint dwHighDateTime;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool GetSystemTimes(out FILETIME idleTime, out FILETIME kernelTime, out FILETIME userTime);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    public struct MEMORYSTATUSEX {
+        public uint dwLength;
+        public uint dwMemoryLoad;
+        public ulong ullTotalPhys;
+        public ulong ullAvailPhys;
+        public ulong ullTotalPageFile;
+        public ulong ullAvailPageFile;
+        public ulong ullTotalVirtual;
+        public ulong ullAvailVirtual;
+        public ulong ullAvailExtendedVirtual;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    public static extern bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX lpBuffer);
+
+    private static ulong prevIdle = 0;
+    private static ulong prevKernel = 0;
+    private static ulong prevUser = 0;
+
+    private static ulong ToUInt64(FILETIME ft) {
+        return unchecked(((ulong)ft.dwHighDateTime << 32) | ft.dwLowDateTime);
+    }
+
+    public static double GetCpuUsage() {
+        FILETIME idle, kernel, user;
+        if (!GetSystemTimes(out idle, out kernel, out user)) return 0;
+        ulong i = ToUInt64(idle);
+        ulong k = ToUInt64(kernel);
+        ulong u = ToUInt64(user);
+
+        if (prevKernel == 0 && prevUser == 0) {
+            prevIdle = i; prevKernel = k; prevUser = u;
+            return 0;
+        }
+
+        ulong dIdle = i - prevIdle;
+        ulong dKernel = k - prevKernel;
+        ulong dUser = u - prevUser;
+
+        prevIdle = i; prevKernel = k; prevUser = u;
+
+        ulong dTotal = dKernel + dUser;
+        if (dTotal == 0) return 0;
+        double pct = (double)(dTotal - dIdle) / dTotal * 100.0;
+        if (pct < 0) pct = 0;
+        if (pct > 100) pct = 100;
+        return pct;
+    }
+
+    public static void GetMemory(out double totalGb, out double usedGb) {
+        MEMORYSTATUSEX mem = new MEMORYSTATUSEX();
+        mem.dwLength = (uint)Marshal.SizeOf(typeof(MEMORYSTATUSEX));
+        if (GlobalMemoryStatusEx(ref mem)) {
+            totalGb = Math.Round((double)mem.ullTotalPhys / 1073741824.0, 1);
+            usedGb = Math.Round((double)(mem.ullTotalPhys - mem.ullAvailPhys) / 1073741824.0, 1);
+        } else {
+            totalGb = 0; usedGb = 0;
+        }
+    }
+}
+
+public static class FastNetInfo {
+    [DllImport("iphlpapi.dll", SetLastError = true)]
+    public static extern uint GetExtendedTcpTable(
+        IntPtr pTcpTable,
+        ref int pdwSize,
+        bool bOrder,
+        int ulAf,
+        int tableClass,
+        uint reserved = 0);
+
+    public const int AF_INET = 2;
+    public const int AF_INET6 = 23;
+    public const int TCP_TABLE_OWNER_PID_ALL = 5;
+
+    public struct FastTcpConn {
+        public int LocalPort;
+        public int RemotePort;
+        public string LocalAddr;
+        public string RemoteAddr;
+        public int Pid;
+    }
+
+    public static List<FastTcpConn> GetAllTcpConnections(out HashSet<int> listeningPorts) {
+        var conns = new List<FastTcpConn>();
+        listeningPorts = new HashSet<int>();
+
+        // IPv4
+        int size = 0;
+        GetExtendedTcpTable(IntPtr.Zero, ref size, false, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
+        if (size > 0) {
+            IntPtr buf = Marshal.AllocHGlobal(size);
+            try {
+                if (GetExtendedTcpTable(buf, ref size, false, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) == 0) {
+                    int numEntries = Marshal.ReadInt32(buf);
+                    IntPtr rowPtr = (IntPtr)((long)buf + 4);
+                    for (int i = 0; i < numEntries; i++) {
+                        int state = Marshal.ReadInt32(rowPtr, 0);
+                        int locPortRaw = Marshal.ReadInt32(rowPtr, 8);
+                        int locPort = ((locPortRaw & 0xFF) << 8) | ((locPortRaw >> 8) & 0xFF);
+
+                        if (state == 2) {
+                            listeningPorts.Add(locPort);
+                        } else if (state == 5) {
+                            uint locAddr = (uint)Marshal.ReadInt32(rowPtr, 4);
+                            uint remAddr = (uint)Marshal.ReadInt32(rowPtr, 12);
+                            int remPortRaw = Marshal.ReadInt32(rowPtr, 16);
+                            int remPort = ((remPortRaw & 0xFF) << 8) | ((remPortRaw >> 8) & 0xFF);
+                            int pid = Marshal.ReadInt32(rowPtr, 20);
+
+                            string locIp = new IPAddress(BitConverter.GetBytes(locAddr)).ToString();
+                            string remIp = new IPAddress(BitConverter.GetBytes(remAddr)).ToString();
+
+                            conns.Add(new FastTcpConn {
+                                LocalPort = locPort,
+                                RemotePort = remPort,
+                                LocalAddr = locIp,
+                                RemoteAddr = remIp,
+                                Pid = pid
+                            });
+                        }
+                        rowPtr = (IntPtr)((long)rowPtr + 24);
+                    }
+                }
+            } finally {
+                Marshal.FreeHGlobal(buf);
+            }
+        }
+
+        // IPv6
+        size = 0;
+        GetExtendedTcpTable(IntPtr.Zero, ref size, false, AF_INET6, TCP_TABLE_OWNER_PID_ALL, 0);
+        if (size > 0) {
+            IntPtr buf = Marshal.AllocHGlobal(size);
+            try {
+                if (GetExtendedTcpTable(buf, ref size, false, AF_INET6, TCP_TABLE_OWNER_PID_ALL, 0) == 0) {
+                    int numEntries = Marshal.ReadInt32(buf);
+                    IntPtr rowPtr = (IntPtr)((long)buf + 4);
+                    byte[] ipBytes = new byte[16];
+                    for (int i = 0; i < numEntries; i++) {
+                        int state = Marshal.ReadInt32(rowPtr, 48);
+                        int locPortRaw = Marshal.ReadInt32(rowPtr, 20);
+                        int locPort = ((locPortRaw & 0xFF) << 8) | ((locPortRaw >> 8) & 0xFF);
+
+                        if (state == 2) {
+                            listeningPorts.Add(locPort);
+                        } else if (state == 5) {
+                            Marshal.Copy(rowPtr, ipBytes, 0, 16);
+                            string locIp = new IPAddress(ipBytes).ToString();
+
+                            IntPtr remPtr = (IntPtr)((long)rowPtr + 24);
+                            Marshal.Copy(remPtr, ipBytes, 0, 16);
+                            string remIp = new IPAddress(ipBytes).ToString();
+
+                            int remPortRaw = Marshal.ReadInt32(rowPtr, 44);
+                            int remPort = ((remPortRaw & 0xFF) << 8) | ((remPortRaw >> 8) & 0xFF);
+                            int pid = Marshal.ReadInt32(rowPtr, 52);
+
+                            conns.Add(new FastTcpConn {
+                                LocalPort = locPort,
+                                RemotePort = remPort,
+                                LocalAddr = locIp,
+                                RemoteAddr = remIp,
+                                Pid = pid
+                            });
+                        }
+                        rowPtr = (IntPtr)((long)rowPtr + 56);
+                    }
+                }
+            } finally {
+                Marshal.FreeHGlobal(buf);
+            }
+        }
+
+        return conns;
+    }
+}
+'@
+        Add-Type -TypeDefinition $csharpCode -Language CSharp
+    }
+
+    # Prime CPU usage delta measurement
+    [FastSysInfo]::GetCpuUsage() | Out-Null
 
     $startTime = [System.Diagnostics.Stopwatch]::StartNew()
     $lastHwPoll = [System.Diagnostics.Stopwatch]::StartNew()
+    $script:lastSlowPoll = [System.Diagnostics.Stopwatch]::StartNew()
     $currentCount = 0
     $totalCount = $Total
     $recentLines = [System.Collections.Generic.Queue[string]]::new()
     $maxRecentLines = 4
     $script:exitRequested = $false
-    $script:appVersion = "1.1.0"
+    $script:appVersion = "1.2.0"
+    $script:firstRender = $true
 
     # Comprehensive Service & Database Catalog
     $script:knownServices = @{
@@ -156,21 +383,11 @@ begin {
         if ($found) { $script:nvismiPath = $found }
     }
 
-    # Locate Ollama server log file
-    $script:ollamaLog = $null
-    $possibleLogPaths = @(
-        "$env:LOCALAPPDATA\Ollama\server.log",
-        "$env:USERPROFILE\.ollama\server.log",
-        "$env:HOME/.ollama/server.log"
-    )
-    foreach ($lp in $possibleLogPaths) {
-        if (Test-Path $lp) { $script:ollamaLog = $lp; break }
-    }
-
     # CPU Static Specs
-    $cpuInfo = Get-CimInstance Win32_Processor -Property Name,NumberOfCores,NumberOfLogicalProcessors -ErrorAction SilentlyContinue | Select-Object -First 1
+    $cpuInfo = Get-CimInstance Win32_Processor -Property Name,NumberOfCores,NumberOfLogicalProcessors,MaxClockSpeed -ErrorAction SilentlyContinue | Select-Object -First 1
     $cpuName = if ($cpuInfo) { ($cpuInfo.Name -replace '\(R\)|\(TM\)|\bCPU\b','').Trim() } else { "Host CPU" }
     $cpuCores = if ($cpuInfo) { "$($cpuInfo.NumberOfCores)C/$($cpuInfo.NumberOfLogicalProcessors)T" } else { "" }
+    $script:cpuMaxClock = if ($cpuInfo -and $cpuInfo.MaxClockSpeed) { [int]$cpuInfo.MaxClockSpeed } else { 0 }
 
     # NPU & Integrated GPU Detection
     $script:npuDevice = Get-CimInstance Win32_PnPEntity | Where-Object { $_.Name -match 'AI Boost|\bNPU\b|Neural' } | Select-Object -First 1 Name, Status
@@ -183,6 +400,11 @@ begin {
         }
     }
 
+    # Throttled sensor state caches
+    $script:cachedNpuUtil = 0
+    $script:cachedIntelGpuUtil = 0
+    $script:listeningPorts = [System.Collections.Generic.HashSet[int]]::new()
+
     # Per-port token speeds cache and history
     $script:cachedPromptSpeedByPort = @{}
     $script:cachedGenSpeedByPort    = @{}
@@ -192,8 +414,9 @@ begin {
     $script:resetNoticeUntil        = [DateTime]::MinValue
 
     # Dynamic Ollama Log Resolution & Slot Configuration
-    $script:resolvedLogByPort = @{}
-    $script:slotsByPort       = @{}
+    $script:resolvedLogByPort        = @{}
+    $script:logLookupFailedUntil     = @{}
+    $script:slotsByPort              = @{}
 
     foreach ($p in $OllamaPorts) {
         $script:cachedPromptSpeedByPort[$p] = 0.0
@@ -252,6 +475,10 @@ begin {
                 }
             }
         }
+        # Negative cache: don't scan filesystem on every tick if previously not found
+        if ($script:logLookupFailedUntil.ContainsKey($port) -and [DateTime]::Now -lt $script:logLookupFailedUntil[$port]) {
+            return $null
+        }
 
         # 1. Standard candidates
         $candidates = [System.Collections.Generic.List[string]]::new()
@@ -265,10 +492,10 @@ begin {
         $candidates.Add("$env:TEMP\ollama-$port.log")
         $candidates.Add("$env:TEMP\ollama_$port.log")
 
-        # 2. Dynamic Discovery in Tasks & Temp Logs (actively modified)
+        # 2. Dynamic Discovery in Tasks & Temp Logs
         try {
             $taskLogs = Get-ChildItem -Path "$env:USERPROFILE\.gemini\antigravity\brain\*\.system_generated\tasks\*.log" -ErrorAction SilentlyContinue |
-                        Sort-Object LastWriteTime -Descending | Select-Object -First 15
+                        Sort-Object LastWriteTime -Descending | Select-Object -First 10
             foreach ($tl in $taskLogs) {
                 $headLines = Get-LogHeadLines -path $tl.FullName -lineCount 30
                 $head = $headLines -join "`n"
@@ -286,6 +513,7 @@ begin {
             return $freshest
         }
 
+        $script:logLookupFailedUntil[$port] = [DateTime]::Now.AddSeconds(30)
         return $null
     }
 
@@ -416,6 +644,7 @@ begin {
         GpuMemClk      = 0
         CpuUtil        = 0
         CpuClk         = 0
+        CpuTempStr     = "  Aktiv"
         RamUsedGb      = 0.0
         RamTotGb       = 0.0
         NpuFound       = [bool]$script:npuDevice
@@ -456,33 +685,36 @@ begin {
             } catch {}
         }
 
-        # 2. Host CPU & RAM
+        # 2. Host CPU & RAM (High-Speed Win32 APIs: < 2 ms instead of 1300 ms!)
         try {
-            $procLive = Get-CimInstance Win32_Processor -Property LoadPercentage,CurrentClockSpeed -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($procLive) {
-                $hw.CpuUtil = [int]$procLive.LoadPercentage
-                $hw.CpuClk  = [int]$procLive.CurrentClockSpeed
-            }
-            $os = Get-CimInstance Win32_OperatingSystem -Property FreePhysicalMemory,TotalVisibleMemorySize -ErrorAction SilentlyContinue
-            if ($os) {
-                $hw.RamTotGb = [math]::Round($os.TotalVisibleMemorySize / 1MB, 1)
-                $hw.RamUsedGb = [math]::Round(($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / 1MB, 1)
-            }
+            $cpuPct = [FastSysInfo]::GetCpuUsage()
+            $hw.CpuUtil = [int][math]::Round($cpuPct, 0)
+            $hw.CpuClk  = $script:cpuMaxClock
+            
+            $totGb = 0.0; $usedGb = 0.0
+            [FastSysInfo]::GetMemory([ref]$totGb, [ref]$usedGb)
+            $hw.RamTotGb  = $totGb
+            $hw.RamUsedGb = $usedGb
         } catch {}
 
-        # 3. NPU & Integrated GPU Load
+        # 3. NPU & Integrated GPU Load (Throttled to every 4s to prevent WMI lag)
         if ($hw.NpuFound -or $hw.IntelGpuFound) {
-            try {
-                $engs = Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine -ErrorAction SilentlyContinue
-                if ($hw.NpuFound) {
-                    $npuEng = $engs | Where-Object { $_.Name -match 'Neural' }
-                    $hw.NpuUtil = if ($npuEng) { [int][math]::Min(100, (($npuEng | Measure-Object -Property UtilizationPercentage -Sum).Sum)) } else { 0 }
-                }
-                if ($hw.IntelGpuFound -and $script:intelLuid) {
-                    $intelEng = $engs | Where-Object { $_.Name -match $script:intelLuid }
-                    $hw.IntelGpuUtil = if ($intelEng) { [int][math]::Min(100, (($intelEng | Measure-Object -Property UtilizationPercentage -Sum).Sum)) } else { 0 }
-                }
-            } catch {}
+            if ($script:lastSlowPoll.ElapsedMilliseconds -ge 4000 -or $script:cachedNpuUtil -eq 0) {
+                try {
+                    $engs = Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine -ErrorAction SilentlyContinue
+                    if ($hw.NpuFound) {
+                        $npuEng = $engs | Where-Object { $_.Name -match 'Neural' }
+                        $script:cachedNpuUtil = if ($npuEng) { [int][math]::Min(100, (($npuEng | Measure-Object -Property UtilizationPercentage -Sum).Sum)) } else { 0 }
+                    }
+                    if ($hw.IntelGpuFound -and $script:intelLuid) {
+                        $intelEng = $engs | Where-Object { $_.Name -match $script:intelLuid }
+                        $script:cachedIntelGpuUtil = if ($intelEng) { [int][math]::Min(100, (($intelEng | Measure-Object -Property UtilizationPercentage -Sum).Sum)) } else { 0 }
+                    }
+                    $script:lastSlowPoll.Restart()
+                } catch {}
+            }
+            $hw.NpuUtil      = $script:cachedNpuUtil
+            $hw.IntelGpuUtil = $script:cachedIntelGpuUtil
         }
 
         # 4. Network Traffic & Adapter Stats
@@ -527,12 +759,14 @@ begin {
             $hw.NetNicName = $script:activeNicName
         } catch {}
 
-        # 5. Universal Dynamic Service & Database Discovery
-        $allTcp = Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue
+        # 5. Universal Dynamic Service & Database Discovery (High-Speed Win32: < 5 ms instead of 2970 ms!)
+        $listeningPorts = $null
+        $allTcp = try { [FastNetInfo]::GetAllTcpConnections([ref]$listeningPorts) } catch { @() }
+        $script:listeningPorts = $listeningPorts
         $portStats = @()
         $clients = @()
 
-        if ($allTcp) {
+        if ($allTcp -and $allTcp.Count -gt 0) {
             # Build target port set
             $monitoredPorts = [System.Collections.Generic.HashSet[int]]::new()
             foreach ($k in $script:knownServices.Keys) { [void]$monitoredPorts.Add($k) }
@@ -540,19 +774,32 @@ begin {
             foreach ($p in $OllamaPorts) { [void]$monitoredPorts.Add($p) }
 
             # Filter active connections touching monitored services (deduplicate loopback pairs)
-            $matchedConns = $allTcp | Where-Object {
-                if ($monitoredPorts.Contains($_.RemotePort)) {
-                    return $true
-                } elseif ($monitoredPorts.Contains($_.LocalPort)) {
-                    return ($_.RemoteAddress -notin @('127.0.0.1', '::1'))
+            $matchedConns = [System.Collections.Generic.List[object]]::new()
+            foreach ($conn in $allTcp) {
+                if ($monitoredPorts.Contains($conn.RemotePort)) {
+                    $matchedConns.Add($conn)
+                } elseif ($monitoredPorts.Contains($conn.LocalPort)) {
+                    if ($conn.RemoteAddr -notin @('127.0.0.1', '::1')) {
+                        $matchedConns.Add($conn)
+                    }
                 }
-                return $false
             }
 
-            # Exclude monitor itself (powershell/pwsh) from service worker socket counts
-            $workerConns = $matchedConns | Where-Object {
-                $proc = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
-                return (-not ($proc -and $proc.ProcessName -match 'powershell|pwsh|svchost'))
+            # Cache processes once per tick in a hashtable: O(1) lookups
+            $procCache = @{}
+            try {
+                foreach ($proc in [System.Diagnostics.Process]::GetProcesses()) {
+                    $procCache[$proc.Id] = $proc
+                }
+            } catch {}
+
+            # Exclude monitor itself from service worker socket counts
+            $workerConns = [System.Collections.Generic.List[object]]::new()
+            foreach ($conn in $matchedConns) {
+                $pObj = $procCache[$conn.Pid]
+                if (-not ($pObj -and $pObj.ProcessName -match 'powershell|pwsh|svchost')) {
+                    $workerConns.Add($conn)
+                }
             }
 
             # Group by Service Port for service summary
@@ -563,8 +810,8 @@ begin {
             foreach ($grp in $groupedByPort) {
                 $pNum = [int]$grp.Name
                 $svcName = Get-ServiceName $pNum
-                $firstConn = $grp.Group | Select-Object -First 1
-                $targetAddr = if ($monitoredPorts.Contains($firstConn.RemotePort)) { $firstConn.RemoteAddress } else { $firstConn.LocalAddress }
+                $firstConn = $grp.Group[0]
+                $targetAddr = if ($monitoredPorts.Contains($firstConn.RemotePort)) { $firstConn.RemoteAddr } else { $firstConn.LocalAddr }
                 $scope = Get-NetworkScope $targetAddr
                 
                 # Format friendly endpoint
@@ -582,12 +829,12 @@ begin {
             }
 
             # Discover active client processes connected to services
-            $clientConns = $matchedConns | Where-Object { $monitoredPorts.Contains($_.RemotePort) }
+            $clientConns = $workerConns | Where-Object { $monitoredPorts.Contains($_.RemotePort) }
             if ($clientConns) {
-                $groupedClients = $clientConns | Group-Object OwningProcess
+                $groupedClients = $clientConns | Group-Object Pid
                 foreach ($g in $groupedClients) {
                     $pidNum = [int]$g.Name
-                    $proc = Get-Process -Id $pidNum -ErrorAction SilentlyContinue
+                    $proc = $procCache[$pidNum]
                     if ($proc -and $proc.ProcessName -notmatch 'powershell|pwsh|svchost') {
                         $targetNames = [System.Collections.Generic.List[string]]::new()
                         foreach ($conn in $g.Group) {
@@ -597,12 +844,14 @@ begin {
                             $targetNames.Add("$sShort ($rPort)")
                         }
                         $targetStr = ($targetNames | Select-Object -Unique) -join ', '
+                        $memMb = try { [math]::Round($proc.WorkingSet64 / 1MB, 1) } catch { 0.0 }
+                        $cpuSec = try { [math]::Round($proc.TotalProcessorTime.TotalSeconds, 1) } catch { 0.0 }
                         $clients += [PSCustomObject]@{
                             PID         = $pidNum
                             Name        = $proc.ProcessName
                             Target      = $targetStr
-                            MemMB       = [math]::Round($proc.WorkingSet64 / 1MB, 1)
-                            CpuSec      = [math]::Round($proc.CPU, 1)
+                            MemMB       = $memMb
+                            CpuSec      = $cpuSec
                             TargetPorts = @($g.Group | ForEach-Object { [int]$_.RemotePort } | Select-Object -Unique)
                         }
                     }
@@ -615,9 +864,12 @@ begin {
         # 6. Read latest Token Speeds from Ollama server.log
         Get-LatestTokenSpeeds
 
-        # 7. Ollama REST API per Port (if running)
+        # 7. Ollama REST API per Port (ONLY query if port is actually LISTENING: 0 ms timeout!)
         $instances = @()
         foreach ($port in $OllamaPorts) {
+            if ($script:listeningPorts -and -not $script:listeningPorts.Contains($port)) {
+                continue
+            }
             try {
                 $res = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/ps" -TimeoutSec 1 -ErrorAction SilentlyContinue
                 $targetLog = Resolve-OllamaLogPath $port
@@ -686,7 +938,21 @@ begin {
     }
 
     function Render-Dashboard {
-        Clear-Host
+        # Double-Buffered Single-Write Rendering (100% Flicker-Free)
+        $sb = [System.Text.StringBuilder]::new(4096)
+        
+        # Position cursor to (0, 0) without clearing screen (100% flicker-free)
+        if ($script:firstRender) {
+            try { Clear-Host } catch {}
+            $script:firstRender = $false
+        } else {
+            try {
+                [Console]::SetCursorPosition(0, 0)
+            } catch {
+                [void]$sb.Append($script:cHome)
+            }
+        }
+
         $now = Get-Date -Format "HH:mm:ss"
         
         # Terminal width: dynamically fit console window without line wrapping
@@ -702,19 +968,24 @@ begin {
         $subSep  = $script:chHBar * $dashWidth
         $mainSep = $script:chDBar * $dashWidth
 
+        # Helper to append formatted line with Clear-To-End-Of-Line
+        $addLine = {
+            param([string]$lineContent)
+            [void]$sb.AppendLine("$lineContent$($script:cReset)$($script:cClrEOL)")
+        }
+
         # Header
-        Write-Host ""
-        Write-Host $mainSep -ForegroundColor Cyan
-        Write-Host "  OLLAMA-TOP v$script:appVersion: AI, DATABASE & HARDWARE MONITOR  " -NoNewline -ForegroundColor Yellow
-        Write-Host "|  $now  |  Host: $env:COMPUTERNAME" -ForegroundColor Gray
-        Write-Host $subSep -ForegroundColor DarkCyan
+        & $addLine ""
+        & $addLine "$($script:cCyan)$mainSep"
+        & $addLine "  $($script:cYellow)$($script:cBld)OLLAMA-TOP v$($script:appVersion): AI, DATABASE & HARDWARE MONITOR  $($script:cReset)$($script:cGray)|  $now  |  Host: $env:COMPUTERNAME"
+        & $addLine "$($script:cDCyan)$subSep"
 
         # 1. BATCH JOB PROGRESS BAR (Falls gepiped oder -Total angegeben)
         if ($totalCount -gt 0 -or $currentCount -gt 0) {
             $elapsed = $startTime.Elapsed
             $speed = if ($elapsed.TotalSeconds -gt 1 -and $currentCount -gt 0) { $currentCount / $elapsed.TotalSeconds } else { 0 }
             
-            Write-Host "  JOB: $Title" -ForegroundColor White
+            & $addLine "  $($script:cWhite)JOB: $Title"
             if ($totalCount -gt 0) {
                 $pct = $currentCount / $totalCount
                 $barStr = Format-Bar -Pct $pct -Width 32
@@ -725,163 +996,111 @@ begin {
                 $etaTs = [TimeSpan]::FromSeconds($etaSec)
                 $etaStr = if ($speed -gt 0) { Format-Duration $etaTs } else { "Berechne..." }
 
-                Write-Host "  Progress:    [$barStr] " -NoNewline -ForegroundColor Green
-                Write-Host $pctText -ForegroundColor Yellow
-                Write-Host ("  Status:      {0} / {1} Items  (Offen: {2})" -f $currentCount, $totalCount, $remainingItems) -ForegroundColor White
-                Write-Host ("  Speed:       {0:N2} Items/s (~{1:N0}/min) | Elapsed: {2} | ETA: {3}" -f $speed, ($speed * 60), (Format-Duration $elapsed), $etaStr) -ForegroundColor Yellow
+                & $addLine "  $($script:cGreen)Progress:    [$barStr] $($script:cYellow)$pctText"
+                & $addLine ("  $($script:cWhite)Status:      {0} / {1} Items  (Offen: {2})" -f $currentCount, $totalCount, $remainingItems)
+                & $addLine ("  $($script:cYellow)Speed:       {0:N2} Items/s (~{1:N0}/min) | Elapsed: {2} | ETA: {3}" -f $speed, ($speed * 60), (Format-Duration $elapsed), $etaStr)
             } else {
-                Write-Host ("  Status:      {0} Items | Speed: {1:N2} Items/s | Elapsed: {2}" -f $currentCount, $speed, (Format-Duration $elapsed)) -ForegroundColor White
+                & $addLine ("  $($script:cWhite)Status:      {0} Items | Speed: {1:N2} Items/s | Elapsed: {2}" -f $currentCount, $speed, (Format-Duration $elapsed))
             }
-            Write-Host $subSep -ForegroundColor DarkCyan
+            & $addLine "$($script:cDCyan)$subSep"
         }
 
         # 2. NVIDIA GPU HARDWARE SENSORS
         if ($hw.GpuFound) {
             $deg = [string][char]0x00B0
-            $gpuTempColor = "Green"
-            if ($hw.GpuTemp -ge 84) { $gpuTempColor = "Red" }
-            elseif ($hw.GpuTemp -ge 74) { $gpuTempColor = "Yellow" }
+            $gpuTempColor = $script:cGreen
+            if ($hw.GpuTemp -ge 84) { $gpuTempColor = $script:cRed }
+            elseif ($hw.GpuTemp -ge 74) { $gpuTempColor = $script:cYellow }
 
-            Write-Host "  NVIDIA GPU SENSORS ($($hw.GpuName)):" -ForegroundColor White
+            & $addLine "  $($script:cWhite)NVIDIA GPU SENSORS ($($hw.GpuName)):"
 
             # GPU Compute + Temp
             $gpuBar = Format-Bar -Pct ($hw.GpuUtil / 100.0) -Width 18
-            Write-Host "  GPU Core Load:   " -NoNewline -ForegroundColor Gray
-            Write-Host "[$gpuBar] " -NoNewline -ForegroundColor Cyan
-            Write-Host ("{0,3}%" -f $hw.GpuUtil) -ForegroundColor Yellow -NoNewline
-            Write-Host "  | Clock: " -NoNewline -ForegroundColor Gray
-            Write-Host ("{0,5} MHz" -f $hw.GpuCoreClk) -ForegroundColor White -NoNewline
-            Write-Host "  | Temp:  " -NoNewline -ForegroundColor Gray
-            Write-Host ("{0,3}${deg} C" -f $hw.GpuTemp) -ForegroundColor $gpuTempColor
+            & $addLine ("  $($script:cGray)GPU Core Load:   $($script:cCyan)[{0}] $($script:cYellow){1,3}%$($script:cGray)  | Clock: $($script:cWhite){2,5} MHz$($script:cGray)  | Temp:  {3}{4,3}${deg} C" -f $gpuBar, $hw.GpuUtil, $hw.GpuCoreClk, $gpuTempColor, $hw.GpuTemp)
 
             # Memory Bus + Power Draw
             $busBar = Format-Bar -Pct ($hw.MemBusUtil / 100.0) -Width 18
-            Write-Host "  GPU Memory Bus:  " -NoNewline -ForegroundColor Gray
-            Write-Host "[$busBar] " -NoNewline -ForegroundColor Cyan
-            Write-Host ("{0,3}%" -f $hw.MemBusUtil) -ForegroundColor Yellow -NoNewline
-            Write-Host "  | Clock: " -NoNewline -ForegroundColor Gray
-            Write-Host ("{0,5} MHz" -f $hw.GpuMemClk) -ForegroundColor White -NoNewline
-            Write-Host "  | Power: " -NoNewline -ForegroundColor Gray
-            Write-Host ("{0,6:N1} W" -f $hw.GpuPower) -ForegroundColor White
+            & $addLine ("  $($script:cGray)GPU Memory Bus:  $($script:cCyan)[{0}] $($script:cYellow){1,3}%$($script:cGray)  | Clock: $($script:cWhite){2,5} MHz$($script:cGray)  | Power: $($script:cWhite){3,6:N1} W" -f $busBar, $hw.MemBusUtil, $hw.GpuMemClk, $hw.GpuPower)
 
             # VRAM
             $vramPct = if ($hw.VramTot -gt 0) { $hw.VramUsed / $hw.VramTot } else { 0 }
             $vramBar = Format-Bar -Pct $vramPct -Width 18
-            Write-Host "  VRAM Belegung:   " -NoNewline -ForegroundColor Gray
-            Write-Host "[$vramBar] " -NoNewline -ForegroundColor Magenta
-            Write-Host ("{0,6:N1} / {1,6:N1} GB ({2,3:N0}%)" -f $hw.VramUsed, $hw.VramTot, ($vramPct * 100)) -ForegroundColor White
+            & $addLine ("  $($script:cGray)VRAM Belegung:   $($script:cMag)[{0}] $($script:cWhite){1,6:N1} / {2,6:N1} GB ({3,3:N0}%)" -f $vramBar, $hw.VramUsed, $hw.VramTot, ($vramPct * 100))
 
-            Write-Host ""
+            & $addLine ""
         }
 
         # 3. HOST CPU & SYSTEM RAM
-        $cpuThermal = Get-CimInstance Win32_PerfFormattedData_Counters_ThermalZoneInformation -ErrorAction SilentlyContinue | Select-Object -First 1
-        $cpuTempStr = if ($cpuThermal -and $cpuThermal.Temperature -gt 273) { "{0,3}${deg} C" -f [math]::Round($cpuThermal.Temperature - 273.15, 0) } else { "  Aktiv" }
+        & $addLine "  $($script:cWhite)HOST CPU & SYSTEM ($cpuName - $cpuCores):"
 
-        Write-Host "  HOST CPU & SYSTEM ($cpuName - $cpuCores):" -ForegroundColor White
-
-        # CPU Load + Temp
+        # CPU Load
         $cpuBar = Format-Bar -Pct ($hw.CpuUtil / 100.0) -Width 18
-        Write-Host "  CPU Auslastung:  " -NoNewline -ForegroundColor Gray
-        Write-Host "[$cpuBar] " -NoNewline -ForegroundColor Green
-        Write-Host ("{0,3}%" -f $hw.CpuUtil) -ForegroundColor Yellow -NoNewline
-        Write-Host "  | Clock: " -NoNewline -ForegroundColor Gray
-        Write-Host ("{0,5} MHz" -f $hw.CpuClk) -ForegroundColor White -NoNewline
-        Write-Host "  | Temp:  " -NoNewline -ForegroundColor Gray
-        Write-Host ("{0,6}" -f $cpuTempStr) -ForegroundColor Cyan
+        & $addLine ("  $($script:cGray)CPU Auslastung:  $($script:cGreen)[{0}] $($script:cYellow){1,3}%$($script:cGray)  | Clock: $($script:cWhite){2,5} MHz$($script:cGray)  | Temp:  $($script:cCyan){3,6}" -f $cpuBar, $hw.CpuUtil, $hw.CpuClk, $hw.CpuTempStr)
 
         # Host RAM
         $ramPct = if ($hw.RamTotGb -gt 0) { $hw.RamUsedGb / $hw.RamTotGb } else { 0 }
         $ramBar = Format-Bar -Pct $ramPct -Width 18
-        Write-Host "  System RAM:      " -NoNewline -ForegroundColor Gray
-        Write-Host "[$ramBar] " -NoNewline -ForegroundColor Blue
-        Write-Host ("{0,6:N1} / {1,6:N1} GB ({2,3:N0}%)" -f $hw.RamUsedGb, $hw.RamTotGb, ($ramPct * 100)) -ForegroundColor White
+        & $addLine ("  $($script:cGray)System RAM:      $($script:cBlue)[{0}] $($script:cWhite){1,6:N1} / {2,6:N1} GB ({3,3:N0}%)" -f $ramBar, $hw.RamUsedGb, $hw.RamTotGb, ($ramPct * 100))
 
         # 4. INTEL NPU & ACCELERATOR SENSORS (Falls im System vorhanden)
         if ($hw.NpuFound -or $hw.IntelGpuFound) {
-            Write-Host ""
+            & $addLine ""
             $accelHeader = if ($hw.NpuFound) { "INTEL NPU & iGPU SENSORS ($($hw.NpuName)):" } else { "INTEGRATED GPU SENSORS ($($hw.IntelGpuName)):" }
-            Write-Host "  $accelHeader" -ForegroundColor White
+            & $addLine "  $($script:cWhite)$accelHeader"
 
             if ($hw.NpuFound) {
                 $npuBar = Format-Bar -Pct ($hw.NpuUtil / 100.0) -Width 18
-                Write-Host "  NPU Neural Load: " -NoNewline -ForegroundColor Gray
-                Write-Host "[$npuBar] " -NoNewline -ForegroundColor Green
-                Write-Host ("{0,3}%" -f $hw.NpuUtil) -ForegroundColor Yellow -NoNewline
-                Write-Host "  | Engine: " -NoNewline -ForegroundColor Gray
                 $npuNote = if ($hw.NpuUtil -gt 0) { "Neural (Hardware Active)" } else { "Neural (Standby / Ollama nutzt iGPU Vulkan)" }
-                Write-Host $npuNote -ForegroundColor Cyan
+                & $addLine ("  $($script:cGray)NPU Neural Load: $($script:cGreen)[{0}] $($script:cYellow){1,3}%$($script:cGray)  | Engine: $($script:cCyan){2}" -f $npuBar, $hw.NpuUtil, $npuNote)
             }
 
             if ($hw.IntelGpuFound) {
                 $igpuBar = Format-Bar -Pct ($hw.IntelGpuUtil / 100.0) -Width 18
-                Write-Host "  Intel iGPU Load: " -NoNewline -ForegroundColor Gray
-                Write-Host "[$igpuBar] " -NoNewline -ForegroundColor Cyan
-                Write-Host ("{0,3}%" -f $hw.IntelGpuUtil) -ForegroundColor Yellow -NoNewline
-                Write-Host "  | Device: " -NoNewline -ForegroundColor Gray
-                Write-Host ("{0}" -f $hw.IntelGpuName) -ForegroundColor White
+                & $addLine ("  $($script:cGray)Intel iGPU Load: $($script:cCyan)[{0}] $($script:cYellow){1,3}%$($script:cGray)  | Device: $($script:cWhite){2}" -f $igpuBar, $hw.IntelGpuUtil, $hw.IntelGpuName)
             }
         }
 
         # 5. NETWORK TRAFFIC & ACTIVE SERVICES
-        Write-Host ""
+        & $addLine ""
         $nicTitle = if ($hw.NetNicName -and $hw.NetNicName -ne "None") { " ($($hw.NetNicName))" } else { "" }
-        Write-Host ("  NETWORK TRAFFIC & ADAPTER{0}:" -f $nicTitle) -ForegroundColor White
+        & $addLine ("  $($script:cWhite)NETWORK TRAFFIC & ADAPTER{0}:" -f $nicTitle)
 
         $rxStr = "$(Format-Bytes $hw.NetRxSpeed)/s"
         $txStr = "$(Format-Bytes $hw.NetTxSpeed)/s"
         $sessRxStr = Format-Bytes $hw.NetSessionRec
         $sessTxStr = Format-Bytes $hw.NetSessionSent
 
-        Write-Host "  Gesamt Live:     " -NoNewline -ForegroundColor Gray
-        Write-Host "[In / Download] " -NoNewline -ForegroundColor Cyan
-        Write-Host ("{0,-12}" -f $rxStr) -NoNewline -ForegroundColor White
-        Write-Host " [Out / Upload] " -NoNewline -ForegroundColor Yellow
-        Write-Host ("{0,-12}" -f $txStr) -NoNewline -ForegroundColor White
-        Write-Host " | Session: " -NoNewline -ForegroundColor Gray
-        Write-Host ("In {0} / Out {1}" -f $sessRxStr, $sessTxStr) -ForegroundColor DarkCyan
+        & $addLine ("  $($script:cGray)Gesamt Live:     $($script:cCyan)[In / Download] $($script:cWhite){0,-12} $($script:cYellow)[Out / Upload] $($script:cWhite){1,-12} $($script:cGray)| Session: $($script:cDCyan)In {2} / Out {3}" -f $rxStr, $txStr, $sessRxStr, $sessTxStr)
 
         # ACTIVE SERVICES & ENDPOINTS TABLE
         if ($hw.PortStats -and $hw.PortStats.Count -gt 0) {
-            Write-Host ""
-            Write-Host "  ACTIVE SERVICES & ENDPOINTS (Database, Cache & AI):" -ForegroundColor White
-            Write-Host ("  {0,-8}{1,-24}{2,-32}{3,12}  {4,-28}" -f "PORT", "SERVICE", "ENDPOINT / TARGET", "SOCKETS", "SCOPE / NETWORK") -ForegroundColor Gray
-            Write-Host $subSep -ForegroundColor DarkGray
+            & $addLine ""
+            & $addLine "  $($script:cWhite)ACTIVE SERVICES & ENDPOINTS (Database, Cache & AI):"
+            & $addLine ("  $($script:cGray){0,-8}{1,-24}{2,-32}{3,12}  {4,-28}" -f "PORT", "SERVICE", "ENDPOINT / TARGET", "SOCKETS", "SCOPE / NETWORK")
+            & $addLine "$($script:cDGray)$subSep"
             foreach ($ps in $hw.PortStats) {
-                $sockColor = if ($ps.Sockets -gt 0) { "Green" } else { "DarkGray" }
+                $sockColor = if ($ps.Sockets -gt 0) { $script:cGreen } else { $script:cDGray }
                 $sockStr = "{0,5:N0} aktiv" -f $ps.Sockets
-                Write-Host "  " -NoNewline
-                Write-Host ("{0,5}   " -f $ps.Port) -NoNewline -ForegroundColor Yellow
-                Write-Host ("{0,-24}" -f $ps.Service) -NoNewline -ForegroundColor White
-                Write-Host ("{0,-32}" -f $ps.Target) -NoNewline -ForegroundColor Cyan
-                Write-Host ("{0,12}  " -f $sockStr) -NoNewline -ForegroundColor $sockColor
-                Write-Host ("{0,-28}" -f $ps.Scope) -ForegroundColor Gray
+                & $addLine ("  $($script:cYellow){0,5}   $($script:cWhite){1,-24}$($script:cCyan){2,-32}{3}{4,12}  $($script:cGray){5,-28}" -f $ps.Port, $ps.Service, $ps.Target, $sockColor, $sockStr, $ps.Scope)
             }
         }
 
         # 6. LLM ENGINES & INFERENCE SPEED (Falls LLMs aktiv)
         if ($hw.Instances.Count -gt 0) {
-            Write-Host ""
-            Write-Host "  LLM ENGINES & INFERENCE SPEED:" -ForegroundColor White
-            Write-Host ("  {0,-7}{1,-18}{2,9}  {3,10}  {4,11}  {5,18}  {6,18}" -f "PORT", "MODEL / ENGINE", "SLOTS", "CONTEXT", "VRAM/RAM", "TOKENS IN (INPUT)", "TOKENS OUT (GEN)") -ForegroundColor Gray
-            Write-Host $subSep -ForegroundColor DarkGray
+            & $addLine ""
+            & $addLine "  $($script:cWhite)LLM ENGINES & INFERENCE SPEED:"
+            & $addLine ("  $($script:cGray){0,-7}{1,-18}{2,9}  {3,10}  {4,11}  {5,18}  {6,18}" -f "PORT", "MODEL / ENGINE", "SLOTS", "CONTEXT", "VRAM/RAM", "TOKENS IN (INPUT)", "TOKENS OUT (GEN)")
+            & $addLine "$($script:cDGray)$subSep"
             
             foreach ($inst in $hw.Instances) {
-                $slotColor = if ($inst.SlotsNum -gt 1) { "Green" } else { "DarkGray" }
+                $slotColor = if ($inst.SlotsNum -gt 1) { $script:cGreen } else { $script:cDGray }
                 $slotsStr = if ($inst.SlotsNum -eq 1) { " 1 slot " } elseif ($inst.SlotsNum -gt 1) { "{0,2} slots" -f $inst.SlotsNum } else { "{0,7}" -f $inst.Slots }
                 $ctxStr = if ($inst.Ctx -match '^\d+$') { "{0,8:N0}" -f [int64]$inst.Ctx } else { "{0,8}" -f $inst.Ctx }
                 $vramStr = if ($inst.VramGb -gt 0) { "{0,6:N1} GB" -f $inst.VramGb } else { "{0,9}" -f $inst.Vram }
                 $pSpeedStr = if ($inst.PromptSpeedVal -gt 0) { "{0,7:N0} Tok/s" -f $inst.PromptSpeedVal } else { "{0,16}" -f $inst.PromptSpeed }
                 $gSpeedStr = if ($inst.GenSpeedVal -gt 0) { "{0,7:N1} Tok/s" -f $inst.GenSpeedVal } else { "{0,16}" -f $inst.GenSpeed }
 
-                Write-Host "  " -NoNewline
-                Write-Host ("{0,5}  " -f $inst.Port) -NoNewline -ForegroundColor Yellow
-                Write-Host ("{0,-18}" -f $inst.Model) -NoNewline -ForegroundColor White
-                Write-Host ("{0,9}  " -f $slotsStr) -NoNewline -ForegroundColor $slotColor
-                Write-Host ("{0,10}  " -f $ctxStr) -NoNewline -ForegroundColor Gray
-                Write-Host ("{0,11}  " -f $vramStr) -NoNewline -ForegroundColor Magenta
-                Write-Host ("{0,18}  " -f $pSpeedStr) -NoNewline -ForegroundColor DarkYellow
-                Write-Host ("{0,18}" -f $gSpeedStr) -ForegroundColor Cyan
+                & $addLine ("  $($script:cYellow){0,5}  $($script:cWhite){1,-18}{2}{3,9}  $($script:cGray){4,10}  $($script:cMag){5,11}  $($script:cDYell){6,18}  $($script:cCyan){7,18}" -f $inst.Port, $inst.Model, $slotColor, $slotsStr, $ctxStr, $vramStr, $pSpeedStr, $gSpeedStr)
             }
 
             # Speed Statistics per Port (Min / Max / Avg / Median)
@@ -890,50 +1109,42 @@ begin {
                 $pStats = if ($script:promptHistoryByPort.ContainsKey($p)) { Get-StatsSummary -list $script:promptHistoryByPort[$p] -decimals 0 } else { $null }
                 $gStats = if ($script:genHistoryByPort.ContainsKey($p)) { Get-StatsSummary -list $script:genHistoryByPort[$p] -decimals 1 } else { $null }
                 if ($pStats -or $gStats) {
-                    Write-Host ""
+                    & $addLine ""
                     $pTag = "Port $p ($($inst.Model)):"
-                    Write-Host "  Stats $pTag" -ForegroundColor White
+                    & $addLine "  $($script:cWhite)Stats $pTag"
                     if ($pStats) {
-                        Write-Host "    Tokens In:   " -NoNewline -ForegroundColor Gray
-                        Write-Host ("Min: {0,6} | Max: {1,6} | Avg: {2,6} | Med: {3,6} Tok/s  (n={4,5})" -f $pStats.Min, $pStats.Max, $pStats.Avg, $pStats.Median, $pStats.Count) -ForegroundColor DarkYellow
+                        & $addLine ("    $($script:cGray)Tokens In:   $($script:cDYell)Min: {0,6} | Max: {1,6} | Avg: {2,6} | Med: {3,6} Tok/s  (n={4,5})" -f $pStats.Min, $pStats.Max, $pStats.Avg, $pStats.Median, $pStats.Count)
                     }
                     if ($gStats) {
-                        Write-Host "    Tokens Out:  " -NoNewline -ForegroundColor Gray
-                        Write-Host ("Min: {0,6} | Max: {1,6} | Avg: {2,6} | Med: {3,6} Tok/s  (n={4,5})" -f $gStats.Min, $gStats.Max, $gStats.Avg, $gStats.Median, $gStats.Count) -ForegroundColor Cyan
+                        & $addLine ("    $($script:cGray)Tokens Out:  $($script:cCyan)Min: {0,6} | Max: {1,6} | Avg: {2,6} | Med: {3,6} Tok/s  (n={4,5})" -f $gStats.Min, $gStats.Max, $gStats.Avg, $gStats.Median, $gStats.Count)
                     }
                 }
             }
             if ([DateTime]::Now -lt $script:resetNoticeUntil) {
-                Write-Host ""
-                Write-Host "  [>> Statistiken zurueckgesetzt! <<]" -ForegroundColor Green
+                & $addLine ""
+                & $addLine "  $($script:cGreen)[>> Statistiken zurueckgesetzt! <<]"
             }
         }
 
         # 7. ACTIVE PARALLEL CLIENTS & WORKERS
         $clientCount = $hw.Clients.Count
-        Write-Host ""
-        Write-Host "  ACTIVE CLIENTS & PARALLEL WORKERS: " -NoNewline -ForegroundColor White
-        Write-Host "[$clientCount parallel verbunden]" -ForegroundColor $(if ($clientCount -gt 0) { "Yellow" } else { "DarkGray" })
-        Write-Host ("  {0,7}  {1,-14}{2,-42}{3,17}  {4,15}" -f "PID", "CLIENT", "CONNECTED SERVICES / TARGETS", "MEMORY", "CPU TIME") -ForegroundColor Gray
-        Write-Host $subSep -ForegroundColor DarkGray
+        $clientCountColor = if ($clientCount -gt 0) { $script:cYellow } else { $script:cDGray }
+        & $addLine ""
+        & $addLine "  $($script:cWhite)ACTIVE CLIENTS & PARALLEL WORKERS: ${clientCountColor}[$clientCount parallel verbunden]"
+        & $addLine ("  $($script:cGray){0,7}  {1,-14}{2,-42}{3,17}  {4,15}" -f "PID", "CLIENT", "CONNECTED SERVICES / TARGETS", "MEMORY", "CPU TIME")
+        & $addLine "$($script:cDGray)$subSep"
 
         if ($clientCount -eq 0) {
-            Write-Host "  [Keine aktiven Client-Sockets auf den ueberwachten Ports]" -ForegroundColor DarkGray
+            & $addLine "  $($script:cDGray)[Keine aktiven Client-Sockets auf den ueberwachten Ports]"
         } else {
             foreach ($c in $hw.Clients) {
-                Write-Host "  " -NoNewline
-                Write-Host ("{0,7}  " -f $c.PID) -NoNewline -ForegroundColor White
-                Write-Host ("{0,-14}" -f $c.Name) -NoNewline -ForegroundColor Cyan
                 $dispTarget = if ($c.Target.Length -gt 40) { $c.Target.Substring(0, 37) + "..." } else { $c.Target }
-                Write-Host ("{0,-42}" -f $dispTarget) -NoNewline -ForegroundColor Yellow
                 $memStr = "{0,11:N1} MB" -f $c.MemMB
-                Write-Host ("{0,17}  " -f $memStr) -NoNewline -ForegroundColor White
                 $cpuStr = "{0,11:N1} s" -f $c.CpuSec
-                Write-Host ("{0,15}" -f $cpuStr) -ForegroundColor Gray
+                & $addLine ("  $($script:cWhite){0,7}  $($script:cCyan){1,-14}$($script:cYellow){2,-42}$($script:cWhite){3,17}  $($script:cGray){4,15}" -f $c.PID, $c.Name, $dispTarget, $memStr, $cpuStr)
             }
         }
 
-        
         # 8. SYSTEM HEALTH & CONFIG ADVISOR
         $advisories = [System.Collections.Generic.List[PSCustomObject]]::new()
 
@@ -1051,42 +1262,45 @@ begin {
             })
         }
 
-        Write-Host ""
-        Write-Host "  SYSTEM HEALTH & CONFIG ADVISOR:" -ForegroundColor White
-        Write-Host $subSep -ForegroundColor DarkGray
+        & $addLine ""
+        & $addLine "  $($script:cWhite)SYSTEM HEALTH & CONFIG ADVISOR:"
+        & $addLine "$($script:cDGray)$subSep"
 
         $critAdvisories = $advisories | Where-Object { $_.Level -in @('WARN', 'ALERT') }
         if ($critAdvisories -and $critAdvisories.Count -gt 0) {
             foreach ($adv in $critAdvisories) {
-                # Entire line colored as requested for warnings and errors
-                Write-Host ("  {0} {1}: {2}" -f $adv.Icon, $adv.Title, $adv.Msg) -ForegroundColor $adv.Color
+                $advColor = if ($adv.Color -eq "Red") { $script:cRed } elseif ($adv.Color -eq "Yellow") { $script:cYellow } else { $script:cGreen }
+                & $addLine ("  {0}{1} {2}: {3}" -f $advColor, $adv.Icon, $adv.Title, $adv.Msg)
             }
         } else {
-            # Normal state: show clear, meaningful concurrency & engine health (max 2 concise lines)
             $engineAdv = $advisories | Where-Object { $_.Title -match 'CONTINUOUS|DEDICATED|BOTTLENECK' }
             if ($engineAdv) {
                 foreach ($adv in $engineAdv) {
-                    Write-Host ("  {0} {1}: {2}" -f $adv.Icon, $adv.Title, $adv.Msg) -ForegroundColor Green
+                    & $addLine ("  $($script:cGreen){0} {1}: {2}" -f $adv.Icon, $adv.Title, $adv.Msg)
                 }
             } else {
-                Write-Host "  [*] All inference engines and database services running optimal. No bottlenecks." -ForegroundColor Green
+                & $addLine "  $($script:cGreen)[*] All inference engines and database services running optimal. No bottlenecks."
             }
         }
 
         # 9. RECENT LOG OUTPUT (Falls gepiped)
         if ($recentLines.Count -gt 0) {
-            Write-Host ""
-            Write-Host $subSep -ForegroundColor DarkCyan
-            Write-Host "  RECENT OUTPUT:" -ForegroundColor White
+            & $addLine ""
+            & $addLine "$($script:cDCyan)$subSep"
+            & $addLine "  $($script:cWhite)RECENT OUTPUT:"
             foreach ($l in $recentLines) {
                 $display = if ($l.Length -gt ($dashWidth - 6)) { $l.Substring(0, $dashWidth - 9) + "..." } else { $l }
-                Write-Host "  > $display" -ForegroundColor Gray
+                & $addLine "  $($script:cGray)> $display"
             }
         }
 
         $uUml = [string][char]0x00FC
-        Write-Host $mainSep -ForegroundColor Cyan
-        Write-Host "  Frank Gl${uUml}ck (Gl${uUml}ck IT)  |  https://dozent.net  |  GitHub: glueck-it/ollama-top  |  [R] Reset  |  [Q/X] Exit" -ForegroundColor DarkGray
+        & $addLine "$($script:cCyan)$mainSep"
+        & $addLine "  $($script:cDGray)Frank Gl${uUml}ck (Gl${uUml}ck IT)  |  https://dozent.net  |  GitHub: glueck-it/ollama-top  |  [R] Reset  |  [Q/X] Exit"
+
+        # Clear remaining screen buffer below dashboard and flush frame in single atomic call
+        [void]$sb.Append($script:cClrEOS)
+        [Console]::Write($sb.ToString())
     }
 
     Check-KeyboardInput
@@ -1133,29 +1347,33 @@ process {
 }
 
 end {
-    if ($MyInvocation.ExpectingInput -eq $false -or ($currentCount -eq 0 -and $recentLines.Count -eq 0 -and $InputObject -eq $null)) {
-        while (-not $script:exitRequested) {
+    try {
+        if ($currentCount -eq 0 -and $recentLines.Count -eq 0 -and $InputObject -eq $null) {
+            while (-not $script:exitRequested) {
+                Check-KeyboardInput
+                if ($script:exitRequested) { break }
+                Update-Sensors
+                Render-Dashboard
+                $sleepSw = [System.Diagnostics.Stopwatch]::StartNew()
+                while ($sleepSw.ElapsedMilliseconds -lt $RefreshMs -and -not $script:exitRequested) {
+                    try {
+                        if ([Console]::KeyAvailable) {
+                            Check-KeyboardInput
+                            if ($script:exitRequested) { break }
+                            Render-Dashboard
+                        }
+                    } catch {}
+                    Start-Sleep -Milliseconds 50
+                }
+            }
+            Write-Host "`n  OLLAMA-TOP beendet.`n" -ForegroundColor Yellow
+        } else {
             Check-KeyboardInput
-            if ($script:exitRequested) { break }
             Update-Sensors
             Render-Dashboard
-            $sleepSw = [System.Diagnostics.Stopwatch]::StartNew()
-            while ($sleepSw.ElapsedMilliseconds -lt $RefreshMs -and -not $script:exitRequested) {
-                try {
-                    if ([Console]::KeyAvailable) {
-                        Check-KeyboardInput
-                        if ($script:exitRequested) { break }
-                        Render-Dashboard
-                    }
-                } catch {}
-                Start-Sleep -Milliseconds 50
-            }
+            Write-Host "`n  Job abgeschlossen in $(Format-Duration $startTime.Elapsed)!" -ForegroundColor Green
         }
-        Write-Host "`n  OLLAMA-TOP beendet.`n" -ForegroundColor Yellow
-    } else {
-        Check-KeyboardInput
-        Update-Sensors
-        Render-Dashboard
-        Write-Host "`n  Job abgeschlossen in $(Format-Duration $startTime.Elapsed)!" -ForegroundColor Green
+    } finally {
+        try { [Console]::CursorVisible = $true } catch {}
     }
 }
