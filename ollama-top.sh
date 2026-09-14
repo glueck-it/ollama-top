@@ -274,7 +274,7 @@ render() {
                     if [[ "$line" =~ pid=([0-9]+) ]]; then
                         client_pids["${BASH_REMATCH[1]}"]="$rport"
                     fi
-                elif [[ "$lport" =~ ^($port_regex)$ ]]; then
+                elif [[ "$lport" =~ ^($port_regex)$ && ! "$rip" =~ ^(127\.|::1) ]]; then
                     port_counts["$lport"]=$(( ${port_counts["$lport"]:-0} + 1 ))
                     port_remotes["$lport"]="$rip"
                 fi
@@ -361,11 +361,18 @@ render() {
     fi
 
     echo "${C_CYAN}${SEP_MAIN}${C_RESET}"
-    printf "  ${C_DGRAY}Frank Glück (Glück IT)  |  https://dozent.net  |  GitHub: glueck-it/ollama-top  |  [R] Reset${C_RESET}\n"
+    printf "  ${C_DGRAY}Frank Glück (Glück IT)  |  https://dozent.net  |  GitHub: glueck-it/ollama-top  |  [R] Reset  |  [Q/X] Exit${C_RESET}\n"
 }
 
 # --- Main Loop ---
 while true; do
     render
-    sleep "$REFRESH_SEC"
+    read -t "$REFRESH_SEC" -n 1 key 2>/dev/null
+    if [[ "$key" =~ ^[qQxX]$ ]]; then
+        echo -e "\n  ${C_YELLOW}OLLAMA-TOP beendet.${C_RESET}\n"
+        exit 0
+    elif [[ "$key" =~ ^[rR ]$ ]]; then
+        SESSION_RX=0
+        SESSION_TX=0
+    fi
 done

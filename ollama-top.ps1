@@ -35,13 +35,13 @@ begin {
     $script:chDBar   = [string][char]0x2550 # ═ (Box drawings double horizontal - gapless!)
     $script:chThick  = [string][char]0x2501 # ━ (Box drawings heavy horizontal)
 
-    # State tracking
     $startTime = [System.Diagnostics.Stopwatch]::StartNew()
     $lastHwPoll = [System.Diagnostics.Stopwatch]::StartNew()
     $currentCount = 0
     $totalCount = $Total
     $recentLines = [System.Collections.Generic.Queue[string]]::new()
     $maxRecentLines = 4
+    $script:exitRequested = $false
 
     # Comprehensive Service & Database Catalog
     $script:knownServices = @{
@@ -345,6 +345,8 @@ begin {
                 $k = [Console]::ReadKey($true)
                 if ($k.Key -in @([System.ConsoleKey]::Spacebar, [System.ConsoleKey]::R)) {
                     Reset-SpeedStats
+                } elseif ($k.Key -in @([System.ConsoleKey]::Q, [System.ConsoleKey]::X) -or $k.KeyChar -in @('q', 'Q', 'x', 'X')) {
+                    $script:exitRequested = $true
                 }
             }
         } catch {}
@@ -536,13 +538,24 @@ begin {
             foreach ($p in $WatchPorts) { [void]$monitoredPorts.Add($p) }
             foreach ($p in $OllamaPorts) { [void]$monitoredPorts.Add($p) }
 
-            # Filter active connections touching monitored services
+            # Filter active connections touching monitored services (deduplicate loopback pairs)
             $matchedConns = $allTcp | Where-Object {
-                $monitoredPorts.Contains($_.RemotePort) -or $monitoredPorts.Contains($_.LocalPort)
+                if ($monitoredPorts.Contains($_.RemotePort)) {
+                    return $true
+                } elseif ($monitoredPorts.Contains($_.LocalPort)) {
+                    return ($_.RemoteAddress -notin @('127.0.0.1', '::1'))
+                }
+                return $false
             }
 
-            # Group by RemotePort for service summary
-            $groupedByPort = $matchedConns | Group-Object {
+            # Exclude monitor itself (powershell/pwsh) from service worker socket counts
+            $workerConns = $matchedConns | Where-Object {
+                $proc = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
+                return (-not ($proc -and $proc.ProcessName -match 'powershell|pwsh|svchost'))
+            }
+
+            # Group by Service Port for service summary
+            $groupedByPort = $workerConns | Group-Object {
                 if ($monitoredPorts.Contains($_.RemotePort)) { $_.RemotePort } else { $_.LocalPort }
             }
 
@@ -1072,16 +1085,19 @@ begin {
 
         $uUml = [string][char]0x00FC
         Write-Host $mainSep -ForegroundColor Cyan
-        Write-Host "  Frank Gl${uUml}ck (Gl${uUml}ck IT)  |  https://dozent.net  |  GitHub: glueck-it/ollama-top  |  [R] Reset" -ForegroundColor DarkGray
+        Write-Host "  Frank Gl${uUml}ck (Gl${uUml}ck IT)  |  https://dozent.net  |  GitHub: glueck-it/ollama-top  |  [R] Reset  |  [Q/X] Exit" -ForegroundColor DarkGray
     }
 
     Check-KeyboardInput
-    Update-Sensors
-    Render-Dashboard
+    if (-not $script:exitRequested) {
+        Update-Sensors
+        Render-Dashboard
+    }
 }
 
 process {
     Check-KeyboardInput
+    if ($script:exitRequested) { break }
     if ($_ -ne $null) {
         $line = $_.ToString().TrimEnd()
         if ($line) {
@@ -1117,21 +1133,24 @@ process {
 
 end {
     if ($MyInvocation.ExpectingInput -eq $false -or ($currentCount -eq 0 -and $recentLines.Count -eq 0 -and $InputObject -eq $null)) {
-        while ($true) {
+        while (-not $script:exitRequested) {
             Check-KeyboardInput
+            if ($script:exitRequested) { break }
             Update-Sensors
             Render-Dashboard
             $sleepSw = [System.Diagnostics.Stopwatch]::StartNew()
-            while ($sleepSw.ElapsedMilliseconds -lt $RefreshMs) {
+            while ($sleepSw.ElapsedMilliseconds -lt $RefreshMs -and -not $script:exitRequested) {
                 try {
                     if ([Console]::KeyAvailable) {
                         Check-KeyboardInput
+                        if ($script:exitRequested) { break }
                         Render-Dashboard
                     }
                 } catch {}
                 Start-Sleep -Milliseconds 50
             }
         }
+        Write-Host "`n  OLLAMA-TOP beendet.`n" -ForegroundColor Yellow
     } else {
         Check-KeyboardInput
         Update-Sensors
