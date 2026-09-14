@@ -1022,22 +1022,26 @@ begin {
             })
         }
 
-        # Filter advisories: prioritize warnings/alerts
+        Write-Host ""
+        Write-Host "  SYSTEM HEALTH & CONFIG ADVISOR:" -ForegroundColor White
+        Write-Host $subSep -ForegroundColor DarkGray
+
         $critAdvisories = $advisories | Where-Object { $_.Level -in @('WARN', 'ALERT') }
         if ($critAdvisories -and $critAdvisories.Count -gt 0) {
-            Write-Host ""
-            Write-Host "  SYSTEM HEALTH & CONFIG ADVISOR:" -ForegroundColor White
-            Write-Host $subSep -ForegroundColor DarkGray
             foreach ($adv in $critAdvisories) {
                 # Entire line colored as requested for warnings and errors
                 Write-Host ("  {0} {1}: {2}" -f $adv.Icon, $adv.Title, $adv.Msg) -ForegroundColor $adv.Color
             }
-        } elseif ($advisories.Count -gt 0) {
-            # Compact one-liner summary when running healthy without warnings
-            Write-Host ""
-            Write-Host "  SYSTEM HEALTH: " -NoNewline -ForegroundColor White
-            $infoSummary = ($advisories | ForEach-Object { $_.Title -replace ' \(.*\)','' } | Select-Object -Unique) -join '  |  '
-            Write-Host "[*] $infoSummary" -ForegroundColor Green
+        } else {
+            # Normal state: show clear, meaningful concurrency & engine health (max 2 concise lines)
+            $engineAdv = $advisories | Where-Object { $_.Title -match 'CONTINUOUS|DEDICATED|BOTTLENECK' }
+            if ($engineAdv) {
+                foreach ($adv in $engineAdv) {
+                    Write-Host ("  {0} {1}: {2}" -f $adv.Icon, $adv.Title, $adv.Msg) -ForegroundColor Green
+                }
+            } else {
+                Write-Host "  [*] All inference engines and database services running optimal. No bottlenecks." -ForegroundColor Green
+            }
         }
 
         # 9. RECENT LOG OUTPUT (Falls gepiped)
