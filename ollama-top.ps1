@@ -42,6 +42,7 @@ begin {
     $recentLines = [System.Collections.Generic.Queue[string]]::new()
     $maxRecentLines = 4
     $script:exitRequested = $false
+    $script:appVersion = "1.1.0"
 
     # Comprehensive Service & Database Catalog
     $script:knownServices = @{
@@ -704,7 +705,7 @@ begin {
         # Header
         Write-Host ""
         Write-Host $mainSep -ForegroundColor Cyan
-        Write-Host "  OLLAMA-TOP: AI, DATABASE & HARDWARE MONITOR  " -NoNewline -ForegroundColor Yellow
+        Write-Host "  OLLAMA-TOP v$script:appVersion: AI, DATABASE & HARDWARE MONITOR  " -NoNewline -ForegroundColor Yellow
         Write-Host "|  $now  |  Host: $env:COMPUTERNAME" -ForegroundColor Gray
         Write-Host $subSep -ForegroundColor DarkCyan
 

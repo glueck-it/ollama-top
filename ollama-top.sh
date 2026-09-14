@@ -14,6 +14,7 @@ TOTAL_ITEMS=0
 JOB_TITLE="Batch Job"
 WATCH_PORTS=()
 OLLAMA_PORTS=(11434 11435 8000)
+VERSION="1.1.0"
 WIDTH=108
 
 # Parse arguments
@@ -157,7 +158,7 @@ render() {
 
     echo ""
     echo "${C_CYAN}${SEP_MAIN}${C_RESET}"
-    printf "  ${C_YELLOW}OLLAMA-TOP: AI, DATABASE & HARDWARE MONITOR${C_RESET}  |  ${C_GRAY}%s  |  Host: %s${C_RESET}\n" "$now" "$host_name"
+    printf "  ${C_YELLOW}OLLAMA-TOP v%s: AI, DATABASE & HARDWARE MONITOR${C_RESET}  |  ${C_GRAY}%s  |  Host: %s${C_RESET}\n" "$VERSION" "$now" "$host_name"
     echo "${C_DCYAN}${SEP_SUB}${C_RESET}"
 
     # 1. NVIDIA GPU Sensors (if nvidia-smi available)

@@ -4,6 +4,7 @@
   <img src="assets/ollama-top-icon.svg" width="96" height="96" alt="ollama-top Logo">
 </p>
 
+[![Release](https://img.shields.io/badge/Release-v1.1.0-blue.svg)](https://github.com/glueck-it/ollama-top/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-blue)](https://github.com/glueck-it/ollama-top)
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207%2B-5391FE?logo=powershell)](https://github.com/glueck-it/ollama-top)
@@ -19,6 +20,7 @@
 * 🗄️ **Universal Database & Network Socket Discovery:** Auto-detects active client connections to PostgreSQL, MySQL/MariaDB, Oracle, IBM DB2, IBM Informix, SAP HANA, Microsoft SQL Server, Redis, MongoDB, ClickHouse, and more.
 * 🌐 **Network Bandwidth & Traffic Scope:** Real-time download/upload throughput and intelligent scope classification (`Localhost IPC`, `Local LAN`, `Remote WAN / Cloud`).
 * ⚙️ **Active Parallel Client Workers:** Tracks client runtimes (Python, Perl, PHP, Node.js, Go, Rust) with PID, memory consumption, CPU time, and remote endpoints.
+* 💡 **System Health & Config Advisor:** Intelligent heuristic warnings for slot bottlenecks, VRAM saturation, context limits, and thermal throttling.
 * 📊 **Batch Job Progress Bar:** Pipe any CLI script into `ollama-top` to render live progress bars, throughput rates (Items/s), and real-time ETAs.
 
 ---
@@ -26,58 +28,56 @@
 ## 📸 Live Terminal Preview
 
 ```text
-════════════════════════════════════════════════════════════════════════════════════════════════════════════
-  OLLAMA-TOP: AI, DATABASE & HARDWARE MONITOR  |  09:30:00  |  Host: BLADE
-  Author: Frank Glück (Glück IT)  |  Web: https://dozent.net  |  GitHub: https://github.com/glueck-it/ollama-top
-────────────────────────────────────────────────────────────────────────────────────────────────────────────
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  OLLAMA-TOP v1.1.0: AI, DATABASE & HARDWARE MONITOR  |  11:06:18  |  Host: BLADE
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   NVIDIA GPU SENSORS (GeForce RTX 5070 Ti):
-  GPU Core Load:   [████████████████  ]  90%  | Clock: 2160 MHz
-  GPU Memory Bus:  [████████████      ]  65%  | Clock: 11001 MHz
-  VRAM Belegung:   [███████           ]  4.9 / 11.9 GB (41%)
-  GPU Power/Temp:  114.3 W Power Draw  |  GPU Temp: 78° C
+  GPU Core Load:   [████████████████  ]  91%  | Clock:  2122 MHz  | Temp:   81° C
+  GPU Memory Bus:  [███████           ]  39%  | Clock: 11001 MHz  | Power:  114,0 W
+  VRAM Belegung:   [█████████████████ ]   11,1 /   11,9 GB ( 93%)
 
   HOST CPU & SYSTEM (Intel Core Ultra 9 275HX - 24C/24T):
-  CPU Auslastung:  [████              ]  23%  | Clock: 2700 MHz
-  System RAM:      [████████          ] 44.9 / 95.5 GB (47%)
-  CPU Status/Temp: Package Thermal: 91° C   |  Architecture: x64 (24C/24T)
+  CPU Auslastung:  [█████             ]  28%  | Clock:  2700 MHz  | Temp:   91° C
+  System RAM:      [██████████        ]   51,5 /   95,5 GB ( 54%)
 
   INTEL NPU & iGPU SENSORS (Intel(R) AI Boost):
   NPU Neural Load: [                  ]   0%  | Engine: Neural (Standby / Ollama nutzt iGPU Vulkan)
   Intel iGPU Load: [██████████████████] 100%  | Device: Intel(R) Graphics
 
   NETWORK TRAFFIC & ADAPTER (Realtek USB GbE):
-  Gesamt Live:     [In / Download] 48.2 KB/s   [Out / Upload] 12.4 KB/s   | Session: In 14.2 MB / Out 3.1 MB
+  Gesamt Live:     [In / Download] 48,2 KB/s   [Out / Upload] 12,4 KB/s   | Session: In 14,2 MB / Out 3,1 MB
 
   ACTIVE SERVICES & ENDPOINTS (Database, Cache & AI):
-  PORT    SERVICE                 ENDPOINT / TARGET               SOCKETS       SCOPE / NETWORK             
-────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  11434   Ollama (NVIDIA/Primary) 127.0.0.1:11434 (RTX 5070 Ti)   12 aktiv      Localhost IPC (Loopback)    
-  11435   Ollama (iGPU/Secondary) 127.0.0.1:11435 (iGPU Vulkan)   6 aktiv       Localhost IPC (Loopback)    
-  5432    PostgreSQL              192.168.1.150:5432              4 aktiv       Local LAN / On-Premise      
+  PORT    SERVICE                 ENDPOINT / TARGET                    SOCKETS  SCOPE / NETWORK             
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   5437   PostgreSQL              135.125.180.233:5437                 4 aktiv  Remote WAN / Cloud          
+  11435   Ollama (iGPU/Secondary) 127.0.0.1:11435 (iGPU Vulkan)        1 aktiv  Localhost IPC (Loopback)    
+  11434   Ollama (NVIDIA/Primary) 127.0.0.1:11434 (RTX 5070 Ti)        1 aktiv  Localhost IPC (Loopback)    
 
   LLM ENGINES & INFERENCE SPEED:
-  PORT    MODEL / ENGINE          CONTEXT     VRAM/RAM    TOKENS IN (INPUT)         TOKENS OUT (GEN)        
-────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  11434   gemma4:e4b              40960       3.04 GB     5.012 Tok/s               91.3 Tok/s              
-  11435   gemma4:e4b              40960       3.60 GB     109 Tok/s                 9.8 Tok/s               
+  PORT   MODEL / ENGINE        SLOTS     CONTEXT     VRAM/RAM   TOKENS IN (INPUT)    TOKENS OUT (GEN)
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  11434  gemma4:e4b          3 slots      40.960       3,1 GB         3.415 Tok/s          61,9 Tok/s
+  11435  gemma4:e4b           1 slot      40.960       3,6 GB           117 Tok/s           9,6 Tok/s
 
   Stats Port 11434 (gemma4:e4b):
-    Tokens In:   Min: 5.012 | Max: 5.012 | Avg: 5.012 | Med: 5.012 Tok/s  (n=12)
-    Tokens Out:  Min:  88.5 | Max:  94.2 | Avg:  91.3 | Med:  91.3 Tok/s  (n=12)
-
-  Stats Port 11435 (gemma4:e4b):
-    Tokens In:   Min:    97 | Max:   112 | Avg:   104 | Med:   104 Tok/s  (n=8)
-    Tokens Out:  Min:   9.5 | Max:  10.2 | Avg:   9.8 | Med:   9.8 Tok/s  (n=8)
+    Tokens In:   Min:  2.375 | Max:  4.504 | Avg:  3.423 | Med:  3.505 Tok/s  (n=   26)
+    Tokens Out:  Min:   12,9 | Max:   91,9 | Avg:   42,6 | Med:   50,2 Tok/s  (n=    7)
 
   ACTIVE CLIENTS & PARALLEL WORKERS: [4 parallel verbunden]
-  PID      CLIENT          TARGET ENDPOINT                 LOCAL PORT    MEMORY            CPU TIME         
-────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  18504    php             127.0.0.1:11434                 64297         41.4 MB           4.9 s            
-  20380    php             127.0.0.1:11434                 58296         41.3 MB           5.1 s            
-  35284    php             127.0.0.1:11435                 61306         47.1 MB           3.8 s            
-  39824    php             192.168.1.150:5432              58189         41.7 MB           4.7 s            
-════════════════════════════════════════════════════════════════════════════════════════════════════════════
-  Refresh: 1.2s  |  [Leertaste]/[R]: Reset  |  https://dozent.net  |  https://github.com/glueck-it/ollama-top
+      PID  CLIENT        CONNECTED SERVICES / TARGETS                         MEMORY         CPU TIME
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    35284  php           PostgreSQL (5437), Ollama (11435)                   37,4 MB           11,6 s
+    41228  php           PostgreSQL (5437)                                   37,8 MB            6,5 s
+    41880  php           Ollama (11434), PostgreSQL (5437)                   42,3 MB            6,6 s
+    43160  php           PostgreSQL (5437)                                   39,9 MB            6,8 s
+
+  SYSTEM HEALTH & CONFIG ADVISOR:
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  [*] CONTINUOUS BATCHING OPTIMAL (Port 11434): 2 workers multiplexing seamlessly across 3 GPU slots. Zero queue latency.
+  [*] DEDICATED INFERENCE (Port 11435): 1 active worker running with full dedicated GPU throughput (1 slot configured).
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  Frank Glück (Glück IT)  |  https://dozent.net  |  GitHub: glueck-it/ollama-top  |  [R] Reset  |  [Q/X] Exit
 ```
 
 ---
