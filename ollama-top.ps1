@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Universal AI, Database, GPU & Batch Job Dashboard for Windows PowerShell.
 .DESCRIPTION
@@ -190,26 +190,127 @@ begin {
     $script:seenLogTimingsByPort    = @{}
     $script:resetNoticeUntil        = [DateTime]::MinValue
 
-    # Port to Log File Mappings
-    $script:portLogPaths = @{
-        11434 = @(
-            "$env:LOCALAPPDATA\Ollama\server.log",
-            "$env:USERPROFILE\.ollama\server.log",
-            "$env:HOME/.ollama/server.log"
-        )
-        11435 = @(
-            "C:\Users\Frank\.gemini\antigravity\brain\2a9aabd1-775b-4c56-9fbb-e45ecd7743f2\.system_generated\tasks\task-11746.log",
-            "$env:LOCALAPPDATA\Ollama\server-11435.log",
-            "$env:LOCALAPPDATA\Ollama\server_11435.log",
-            "$env:TEMP\ollama-11435.log"
-        )
-    }
+    # Dynamic Ollama Log Resolution & Slot Configuration
+    $script:resolvedLogByPort = @{}
+    $script:slotsByPort       = @{}
+
     foreach ($p in $OllamaPorts) {
         $script:cachedPromptSpeedByPort[$p] = 0.0
         $script:cachedGenSpeedByPort[$p]    = 0.0
         $script:promptHistoryByPort[$p]     = [System.Collections.Generic.List[double]]::new()
         $script:genHistoryByPort[$p]        = [System.Collections.Generic.List[double]]::new()
         $script:seenLogTimingsByPort[$p]    = [System.Collections.Generic.HashSet[string]]::new()
+    }
+
+    function Get-LogTailLines([string]$path, [int]$byteCount = 65536) {
+        if (-not $path -or -not (Test-Path $path)) { return @() }
+        try {
+            $fs = [System.IO.FileStream]::new($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+            $offset = [math]::Max(0L, ($fs.Length - $byteCount))
+            $fs.Seek($offset, [System.IO.SeekOrigin]::Begin) | Out-Null
+            $sr = [System.IO.StreamReader]::new($fs, [System.Text.Encoding]::UTF8)
+            if ($offset -gt 0) { $sr.ReadLine() | Out-Null }
+            $lines = [System.Collections.Generic.List[string]]::new()
+            while (-not $sr.EndOfStream) {
+                $lines.Add($sr.ReadLine())
+            }
+            $sr.Close()
+            $fs.Close()
+            return $lines
+        } catch {
+            return @()
+        }
+    }
+
+    function Get-LogHeadLines([string]$path, [int]$lineCount = 40) {
+        if (-not $path -or -not (Test-Path $path)) { return @() }
+        try {
+            $fs = [System.IO.FileStream]::new($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+            $sr = [System.IO.StreamReader]::new($fs, [System.Text.Encoding]::UTF8)
+            $lines = [System.Collections.Generic.List[string]]::new()
+            $cnt = 0
+            while (-not $sr.EndOfStream -and $cnt -lt $lineCount) {
+                $lines.Add($sr.ReadLine())
+                $cnt++
+            }
+            $sr.Close()
+            $fs.Close()
+            return $lines
+        } catch {
+            return @()
+        }
+    }
+
+    function Resolve-OllamaLogPath([int]$port) {
+        if ($script:resolvedLogByPort.ContainsKey($port)) {
+            $cached = $script:resolvedLogByPort[$port]
+            if ($cached -and (Test-Path $cached)) {
+                $item = Get-Item $cached -ErrorAction SilentlyContinue
+                if ($item -and ($item.LastWriteTime -ge [DateTime]::Now.AddMinutes(-10))) {
+                    return $cached
+                }
+            }
+        }
+
+        # 1. Standard candidates
+        $candidates = [System.Collections.Generic.List[string]]::new()
+        if ($port -eq 11434) {
+            $candidates.Add("$env:LOCALAPPDATA\Ollama\server.log")
+            $candidates.Add("$env:USERPROFILE\.ollama\server.log")
+            $candidates.Add("$env:HOME/.ollama/server.log")
+        }
+        $candidates.Add("$env:LOCALAPPDATA\Ollama\server-$port.log")
+        $candidates.Add("$env:LOCALAPPDATA\Ollama\server_$port.log")
+        $candidates.Add("$env:TEMP\ollama-$port.log")
+        $candidates.Add("$env:TEMP\ollama_$port.log")
+
+        # 2. Dynamic Discovery in Tasks & Temp Logs (actively modified)
+        try {
+            $taskLogs = Get-ChildItem -Path "$env:USERPROFILE\.gemini\antigravity\brain\*\.system_generated\tasks\*.log" -ErrorAction SilentlyContinue |
+                        Sort-Object LastWriteTime -Descending | Select-Object -First 15
+            foreach ($tl in $taskLogs) {
+                $headLines = Get-LogHeadLines -path $tl.FullName -lineCount 30
+                $head = $headLines -join "`n"
+                if ($head -match ("Listening on 127\.0\.0\.1:" + $port) -or $head -match ("OLLAMA_HOST:.*?127\.0\.0\.1:" + $port)) {
+                    $candidates.Add($tl.FullName)
+                }
+            }
+        } catch {}
+
+        # Select candidate with the freshest modification time
+        $existing = $candidates | Where-Object { Test-Path $_ } | ForEach-Object { Get-Item $_ } | Sort-Object LastWriteTime -Descending
+        if ($existing) {
+            $freshest = $existing[0].FullName
+            $script:resolvedLogByPort[$port] = $freshest
+            return $freshest
+        }
+
+        return $null
+    }
+
+    function Get-OllamaSlots([int]$port, [string]$logPath) {
+        if ($script:slotsByPort.ContainsKey($port) -and $script:slotsByPort[$port] -gt 0) {
+            return $script:slotsByPort[$port]
+        }
+        $slots = 1
+        if ($logPath -and (Test-Path $logPath)) {
+            try {
+                $headLines = Get-LogHeadLines -path $logPath -lineCount 40
+                $head = $headLines -join "`n"
+                if ($head -match '-np\s+(\d+)') {
+                    $slots = [int]$matches[1]
+                } elseif ($head -match 'OLLAMA_NUM_PARALLEL:(\d+)') {
+                    $slots = [int]$matches[1]
+                }
+            } catch {}
+        }
+        if ($slots -eq 1 -and $port -eq 11434) {
+            $regPar = [Environment]::GetEnvironmentVariable('OLLAMA_NUM_PARALLEL', 'User')
+            if ($regPar) { $slots = [int]$regPar }
+            elseif ($env:OLLAMA_NUM_PARALLEL) { $slots = [int]$env:OLLAMA_NUM_PARALLEL }
+        }
+        $script:slotsByPort[$port] = $slots
+        return $slots
     }
 
     # Network tracking state
@@ -273,23 +374,19 @@ begin {
 
     function Get-LatestTokenSpeeds {
         foreach ($port in $OllamaPorts) {
-            $paths = if ($script:portLogPaths.ContainsKey($port)) { $script:portLogPaths[$port] } else { @("$env:LOCALAPPDATA\Ollama\server-$port.log") }
-            $targetLog = $null
-            foreach ($lp in $paths) {
-                if (Test-Path $lp) { $targetLog = $lp; break }
-            }
+            $targetLog = Resolve-OllamaLogPath $port
             if ($targetLog) {
                 try {
-                    $tailLines = Get-Content -Path $targetLog -Tail 150 -ErrorAction SilentlyContinue
+                    $tailLines = Get-LogTailLines -path $targetLog -byteCount 65536
                     foreach ($tl in $tailLines) {
-                        if ($tl -match 'prompt eval time.*?([0-9\.]+)\s+tokens per second') {
+                        if ($tl -match 'prompt.*?(?:eval time|processing).*?([0-9\.]+)\s+(?:tokens per second|t/s)') {
                             $speed = [math]::Round([double]$matches[1], 0)
                             $script:cachedPromptSpeedByPort[$port] = $speed
                             if ($script:seenLogTimingsByPort[$port].Add($tl)) {
                                 $script:promptHistoryByPort[$port].Add($speed)
                             }
                         }
-                        if ($tl -match '(?<!prompt )eval time.*?([0-9\.]+)\s+tokens per second') {
+                        if ($tl -match '(?<!prompt.*?)eval time.*?([0-9\.]+)\s+tokens per second' -or $tl -match 'slot print_timing:.*?tg\s*=\s*([0-9\.]+)\s*t/s') {
                             $speed = [math]::Round([double]$matches[1], 1)
                             $script:cachedGenSpeedByPort[$port] = $speed
                             if ($script:seenLogTimingsByPort[$port].Add($tl)) {
@@ -473,20 +570,26 @@ begin {
             # Discover active client processes connected to services
             $clientConns = $matchedConns | Where-Object { $monitoredPorts.Contains($_.RemotePort) }
             if ($clientConns) {
-                $seenPids = [System.Collections.Generic.HashSet[int]]::new()
-                foreach ($c in $clientConns) {
-                    $pidNum = $c.OwningProcess
-                    if ($seenPids.Add($pidNum)) {
-                        $proc = Get-Process -Id $pidNum -ErrorAction SilentlyContinue
-                        if ($proc -and $proc.ProcessName -notmatch 'powershell|pwsh|svchost') {
-                            $clients += [PSCustomObject]@{
-                                PID        = $pidNum
-                                Name       = $proc.ProcessName
-                                Target     = "$($c.RemoteAddress):$($c.RemotePort)"
-                                LocalPort  = $c.LocalPort
-                                MemMB      = [math]::Round($proc.WorkingSet64 / 1MB, 1)
-                                CpuSec     = [math]::Round($proc.CPU, 1)
-                            }
+                $groupedClients = $clientConns | Group-Object OwningProcess
+                foreach ($g in $groupedClients) {
+                    $pidNum = [int]$g.Name
+                    $proc = Get-Process -Id $pidNum -ErrorAction SilentlyContinue
+                    if ($proc -and $proc.ProcessName -notmatch 'powershell|pwsh|svchost') {
+                        $targetNames = [System.Collections.Generic.List[string]]::new()
+                        foreach ($conn in $g.Group) {
+                            $rPort = [int]$conn.RemotePort
+                            $sName = Get-ServiceName $rPort
+                            $sShort = ($sName -split '\(')[0].Trim()
+                            $targetNames.Add("$sShort ($rPort)")
+                        }
+                        $targetStr = ($targetNames | Select-Object -Unique) -join ', '
+                        $clients += [PSCustomObject]@{
+                            PID         = $pidNum
+                            Name        = $proc.ProcessName
+                            Target      = $targetStr
+                            MemMB       = [math]::Round($proc.WorkingSet64 / 1MB, 1)
+                            CpuSec      = [math]::Round($proc.CPU, 1)
+                            TargetPorts = @($g.Group | ForEach-Object { [int]$_.RemotePort } | Select-Object -Unique)
                         }
                     }
                 }
@@ -503,6 +606,10 @@ begin {
         foreach ($port in $OllamaPorts) {
             try {
                 $res = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/ps" -TimeoutSec 1 -ErrorAction SilentlyContinue
+                $targetLog = Resolve-OllamaLogPath $port
+                $slots = Get-OllamaSlots $port $targetLog
+                $slotsStr = if ($slots -gt 1) { "$slots slots" } else { "1 slot" }
+
                 if ($res -and $res.models -and $res.models.Count -gt 0) {
                     $pSpeed = if ($script:cachedPromptSpeedByPort.ContainsKey($port)) { $script:cachedPromptSpeedByPort[$port] } else { 0.0 }
                     $gSpeed = if ($script:cachedGenSpeedByPort.ContainsKey($port)) { $script:cachedGenSpeedByPort[$port] } else { 0.0 }
@@ -514,8 +621,11 @@ begin {
                         $instances += [PSCustomObject]@{
                             Port        = $port
                             Model       = $m.name
+                            Slots       = $slotsStr
+                            SlotsNum    = $slots
                             Ctx         = "$($m.context_length)"
                             Vram        = "${vramGb} GB"
+                            VramBytes   = [int64]$m.size_vram
                             PromptSpeed = $pSpeedStr
                             GenSpeed    = $gSpeedStr
                             Status      = "Active"
@@ -525,8 +635,11 @@ begin {
                     $instances += [PSCustomObject]@{
                         Port        = $port
                         Model       = "(Ready / No model)"
+                        Slots       = $slotsStr
+                        SlotsNum    = $slots
                         Ctx         = "-"
                         Vram        = "0 GB"
+                        VramBytes   = 0L
                         PromptSpeed = "-"
                         GenSpeed    = "-"
                         Status      = "Idle"
@@ -556,9 +669,15 @@ begin {
         Clear-Host
         $now = Get-Date -Format "HH:mm:ss"
         
-        # Standard width: 108 columns (aligned with console window and tables)
+        # Terminal width: dynamically fit console window without line wrapping
         $termWidth = try { $Host.UI.RawUI.WindowSize.Width } catch { 108 }
-        $dashWidth = if ($Width -gt 40) { $Width } else { 108 }
+        if ($Width -gt 40) {
+            $dashWidth = $Width
+        } elseif ($termWidth -gt 40) {
+            $dashWidth = $termWidth - 1
+        } else {
+            $dashWidth = 108
+        }
         
         $subSep  = $script:chHBar * $dashWidth
         $mainSep = $script:chDBar * $dashWidth
@@ -568,7 +687,7 @@ begin {
         Write-Host $mainSep -ForegroundColor Cyan
         Write-Host "  OLLAMA-TOP: AI, DATABASE & HARDWARE MONITOR  " -NoNewline -ForegroundColor Yellow
         Write-Host "|  $now  |  Host: $env:COMPUTERNAME" -ForegroundColor Gray
-        Write-Host "  Author: Frank Glück (Glück IT)  |  Web: https://dozent.net  |  GitHub: glueck-it/ollama-top" -ForegroundColor DarkCyan
+        Write-Host "  Author: Frank Gl$([char]0x00FC)ck (Gl$([char]0x00FC)ck IT)  |  Web: https://dozent.net  |  GitHub: glueck-it/ollama-top" -ForegroundColor DarkCyan
         Write-Host $subSep -ForegroundColor DarkCyan
 
         # 1. BATCH JOB PROGRESS BAR (Falls gepiped oder -Total angegeben)
@@ -724,21 +843,23 @@ begin {
             }
         }
 
-        # 6. LLM ENGINES & MODEL INFERENCE (Falls LLMs aktiv)
+        # 6. LLM ENGINES & INFERENCE SPEED (Falls LLMs aktiv)
         if ($hw.Instances.Count -gt 0) {
             Write-Host ""
             Write-Host "  LLM ENGINES & INFERENCE SPEED:" -ForegroundColor White
-            Write-Host ("  {0,-8}{1,-24}{2,-12}{3,-12}{4,-26}{5,-24}" -f "PORT", "MODEL / ENGINE", "CONTEXT", "VRAM/RAM", "TOKENS IN (INPUT)", "TOKENS OUT (GEN)") -ForegroundColor Gray
+            Write-Host ("  {0,-8}{1,-20}{2,-10}{3,-10}{4,-12}{5,-25}{6,-21}" -f "PORT", "MODEL / ENGINE", "SLOTS", "CONTEXT", "VRAM/RAM", "TOKENS IN (INPUT)", "TOKENS OUT (GEN)") -ForegroundColor Gray
             Write-Host $subSep -ForegroundColor DarkGray
             
             foreach ($inst in $hw.Instances) {
+                $slotColor = if ($inst.SlotsNum -gt 1) { "Green" } else { "DarkGray" }
                 Write-Host "  " -NoNewline
                 Write-Host ("{0,-8}" -f $inst.Port) -NoNewline -ForegroundColor Yellow
-                Write-Host ("{0,-24}" -f $inst.Model) -NoNewline -ForegroundColor White
-                Write-Host ("{0,-12}" -f $inst.Ctx) -NoNewline -ForegroundColor Gray
+                Write-Host ("{0,-20}" -f $inst.Model) -NoNewline -ForegroundColor White
+                Write-Host ("{0,-10}" -f $inst.Slots) -NoNewline -ForegroundColor $slotColor
+                Write-Host ("{0,-10}" -f $inst.Ctx) -NoNewline -ForegroundColor Gray
                 Write-Host ("{0,-12}" -f $inst.Vram) -NoNewline -ForegroundColor Magenta
-                Write-Host ("{0,-26}" -f $inst.PromptSpeed) -NoNewline -ForegroundColor DarkYellow
-                Write-Host ("{0,-24}" -f $inst.GenSpeed) -ForegroundColor Cyan
+                Write-Host ("{0,-25}" -f $inst.PromptSpeed) -NoNewline -ForegroundColor DarkYellow
+                Write-Host ("{0,-21}" -f $inst.GenSpeed) -ForegroundColor Cyan
             }
 
             # Speed Statistics per Port (Min / Max / Avg / Median)
@@ -771,7 +892,7 @@ begin {
         Write-Host ""
         Write-Host "  ACTIVE CLIENTS & PARALLEL WORKERS: " -NoNewline -ForegroundColor White
         Write-Host "[$clientCount parallel verbunden]" -ForegroundColor $(if ($clientCount -gt 0) { "Yellow" } else { "DarkGray" })
-        Write-Host ("  {0,-9}{1,-16}{2,-32}{3,-14}{4,-18}{5,-17}" -f "PID", "CLIENT", "TARGET ENDPOINT", "LOCAL PORT", "MEMORY", "CPU TIME") -ForegroundColor Gray
+        Write-Host ("  {0,-8}{1,-14}{2,-48}{3,-16}{4,-16}" -f "PID", "CLIENT", "CONNECTED SERVICES / TARGETS", "MEMORY", "CPU TIME") -ForegroundColor Gray
         Write-Host $subSep -ForegroundColor DarkGray
 
         if ($clientCount -eq 0) {
@@ -779,16 +900,146 @@ begin {
         } else {
             foreach ($c in $hw.Clients) {
                 Write-Host "  " -NoNewline
-                Write-Host ("{0,-9}" -f $c.PID) -NoNewline -ForegroundColor White
-                Write-Host ("{0,-16}" -f $c.Name) -NoNewline -ForegroundColor Cyan
-                Write-Host ("{0,-32}" -f $c.Target) -NoNewline -ForegroundColor Yellow
-                Write-Host ("{0,-14}" -f $c.LocalPort) -NoNewline -ForegroundColor Gray
-                Write-Host ("{0,-18}" -f ("{0:N1} MB" -f $c.MemMB)) -NoNewline -ForegroundColor White
-                Write-Host ("{0,-17}" -f ("{0:N1} s" -f $c.CpuSec)) -ForegroundColor Gray
+                Write-Host ("{0,-8}" -f $c.PID) -NoNewline -ForegroundColor White
+                Write-Host ("{0,-14}" -f $c.Name) -NoNewline -ForegroundColor Cyan
+                $dispTarget = if ($c.Target.Length -gt 46) { $c.Target.Substring(0, 43) + "..." } else { $c.Target }
+                Write-Host ("{0,-48}" -f $dispTarget) -NoNewline -ForegroundColor Yellow
+                Write-Host ("{0,-16}" -f ("{0:N1} MB" -f $c.MemMB)) -NoNewline -ForegroundColor White
+                Write-Host ("{0,-16}" -f ("{0:N1} s" -f $c.CpuSec)) -ForegroundColor Gray
             }
         }
 
-        # 8. RECENT LOG OUTPUT (Falls gepiped)
+        
+        # 8. SYSTEM HEALTH & CONFIG ADVISOR
+        $advisories = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+        # Update recent worker activity window (6 seconds grace period for HTTP keep-alives)
+        if (-not $script:recentWorkersByPort) { $script:recentWorkersByPort = @{} }
+        $nowDt = [DateTime]::Now
+        foreach ($c in $hw.Clients) {
+            foreach ($p in $c.TargetPorts) {
+                if (-not $script:recentWorkersByPort.ContainsKey($p)) {
+                    $script:recentWorkersByPort[$p] = @{}
+                }
+                $script:recentWorkersByPort[$p][$c.PID] = $nowDt
+            }
+        }
+        foreach ($p in @($script:recentWorkersByPort.Keys)) {
+            $expPids = @()
+            foreach ($pidNum in $script:recentWorkersByPort[$p].Keys) {
+                if (($nowDt - $script:recentWorkersByPort[$p][$pidNum]).TotalSeconds -gt 6) {
+                    $expPids += $pidNum
+                }
+            }
+            foreach ($pidNum in $expPids) {
+                [void]$script:recentWorkersByPort[$p].Remove($pidNum)
+            }
+        }
+
+        # Check: Worker to Slot Bottleneck
+        foreach ($inst in $hw.Instances) {
+            $p = $inst.Port
+            $workerCount = if ($script:recentWorkersByPort.ContainsKey($p)) { $script:recentWorkersByPort[$p].Count } else { 0 }
+            $slots = $inst.SlotsNum
+
+            if ($workerCount -gt $slots) {
+                $diff = $workerCount - $slots
+                $advisories.Add([PSCustomObject]@{
+                    Level = "WARN"
+                    Icon  = "[!]"
+                    Color = "Yellow"
+                    Title = "CONCURRENCY BOTTLENECK (Port $p)"
+                    Msg   = "$workerCount workers active vs. $slots Ollama slot(s)! $diff worker(s) queued. Run 'setx OLLAMA_NUM_PARALLEL $workerCount' to enable continuous batching."
+                })
+            } elseif ($workerCount -gt 1 -and $slots -ge $workerCount) {
+                $advisories.Add([PSCustomObject]@{
+                    Level = "INFO"
+                    Icon  = "[*]"
+                    Color = "Green"
+                    Title = "CONTINUOUS BATCHING OPTIMAL (Port $p)"
+                    Msg   = "$workerCount workers multiplexing seamlessly across $slots GPU slots. Zero queue latency."
+                })
+            } elseif ($workerCount -eq 1) {
+                $advisories.Add([PSCustomObject]@{
+                    Level = "INFO"
+                    Icon  = "[*]"
+                    Color = "Green"
+                    Title = "DEDICATED INFERENCE (Port $p)"
+                    Msg   = "1 active worker running with full dedicated GPU throughput ($slots slot configured)."
+                })
+            }
+        }
+
+        # Check: High VRAM Usage
+        if ($hw.GpuFound -and $hw.VramTot -gt 0) {
+            $vramPct = ($hw.VramUsed / $hw.VramTot) * 100.0
+            if ($vramPct -ge 95.0) {
+                $advisories.Add([PSCustomObject]@{
+                    Level = "ALERT"
+                    Icon  = "[!]"
+                    Color = "Red"
+                    Title = "CRITICAL VRAM ALLOCATION"
+                    Msg   = ("VRAM at {0:N1}% ({1:N2} / {2:N2} GB). Risk of OOM or partial CPU offload if context expands!" -f $vramPct, $hw.VramUsed, $hw.VramTot)
+                })
+            } elseif ($vramPct -ge 88.0) {
+                $advisories.Add([PSCustomObject]@{
+                    Level = "INFO"
+                    Icon  = "[*]"
+                    Color = "Cyan"
+                    Title = "HIGH VRAM SATURATION"
+                    Msg   = ("VRAM at {0:N1}% ({1:N2} / {2:N2} GB). Optimal high-density GPU utilization." -f $vramPct, $hw.VramUsed, $hw.VramTot)
+                })
+            }
+        }
+
+        # Check: Context Window Size
+        foreach ($inst in $hw.Instances) {
+            if ($inst.Ctx -ne "-" -and [int64]$inst.Ctx -ge 32768) {
+                $advisories.Add([PSCustomObject]@{
+                    Level = "INFO"
+                    Icon  = "[i]"
+                    Color = "Cyan"
+                    Title = "EXTENDED CONTEXT (Port $($inst.Port))"
+                    Msg   = "$($inst.Ctx) tokens configured. Flash Attention recommended to conserve KV-cache VRAM."
+                })
+                break
+            }
+        }
+
+        # Check: Dual-Acceleration Architecture
+        $cudaActive = ($hw.Instances | Where-Object { $_.Port -eq 11434 -and $_.Status -eq "Active" })
+        $igpuActive = ($hw.Instances | Where-Object { $_.Port -eq 11435 -and $_.Status -eq "Active" })
+        if ($cudaActive -and $igpuActive) {
+            $advisories.Add([PSCustomObject]@{
+                Level = "INFO"
+                Icon  = "[*]"
+                Color = "Green"
+                Title = "HETEROGENEOUS HYBRID INFERENCE"
+                Msg   = "NVIDIA discrete GPU (CUDA) and Intel integrated GPU (Vulkan) inferencing concurrently."
+            })
+        } elseif ($hw.NpuFound -and -not $igpuActive) {
+            $advisories.Add([PSCustomObject]@{
+                Level = "INFO"
+                Icon  = "[i]"
+                Color = "DarkGray"
+                Title = "NPU CO-PROCESSOR"
+                Msg   = "$($hw.NpuName) idle. Secondary Ollama instance can offload tasks via Vulkan or DirectML."
+            })
+        }
+
+        if ($advisories.Count -gt 0) {
+            Write-Host ""
+            Write-Host "  SYSTEM HEALTH & CONFIG ADVISOR:" -ForegroundColor White
+            Write-Host $subSep -ForegroundColor DarkGray
+            foreach ($adv in $advisories) {
+                Write-Host "  " -NoNewline
+                Write-Host ("{0,-4}" -f $adv.Icon) -NoNewline -ForegroundColor $adv.Color
+                Write-Host ("{0}: " -f $adv.Title) -NoNewline -ForegroundColor White
+                Write-Host $adv.Msg -ForegroundColor Gray
+            }
+        }
+
+        # 9. RECENT LOG OUTPUT (Falls gepiped)
         if ($recentLines.Count -gt 0) {
             Write-Host ""
             Write-Host $subSep -ForegroundColor DarkCyan
