@@ -182,10 +182,9 @@ render() {
             local g_bus_pct=$(awk -v b="$g_bus" 'BEGIN { printf "%.2f", b/100 }')
 
             echo "  ${C_WHITE}NVIDIA GPU SENSORS (${g_name}):${C_RESET}"
-            printf "  ${C_GRAY}GPU Core Load:   ${C_CYAN}[%s] ${C_YELLOW}%3d%%${C_GRAY}  | Clock: ${C_WHITE}%4d MHz${C_RESET}\n" "$(format_bar "$g_util_pct" 18)" "$g_util" "$g_cclk"
-            printf "  ${C_GRAY}GPU Memory Bus:  ${C_CYAN}[%s] ${C_YELLOW}%3d%%${C_GRAY}  | Clock: ${C_WHITE}%4d MHz${C_RESET}\n" "$(format_bar "$g_bus_pct" 18)" "$g_bus" "$g_mclk"
+            printf "  ${C_GRAY}GPU Core Load:   ${C_CYAN}[%s] ${C_YELLOW}%3d%%${C_GRAY}  | Clock: ${C_WHITE}%4d MHz${C_GRAY}  | Temp: ${C_GREEN}%d° C${C_RESET}\n" "$(format_bar "$g_util_pct" 18)" "$g_util" "$g_cclk" "$g_temp"
+            printf "  ${C_GRAY}GPU Memory Bus:  ${C_CYAN}[%s] ${C_YELLOW}%3d%%${C_GRAY}  | Clock: ${C_WHITE}%4d MHz${C_GRAY}  | Power: ${C_WHITE}%5.1f W${C_RESET}\n" "$(format_bar "$g_bus_pct" 18)" "$g_bus" "$g_mclk" "$g_pwr"
             printf "  ${C_GRAY}VRAM Belegung:   ${C_MAGENTA}[%s] ${C_WHITE}%4.1f / %4.1f GB (${C_WHITE}%.0f%%)${C_RESET}\n" "$(format_bar "$vram_pct" 18)" "$g_vram_used" "$g_vram_tot" "$(awk -v p="$vram_pct" 'BEGIN { print p*100 }')"
-            printf "  ${C_GRAY}GPU Power/Temp:  ${C_WHITE}%5.1f W${C_GRAY} Power Draw  |  GPU Temp: ${C_GREEN}%d° C${C_RESET}\n" "$g_pwr" "$g_temp"
             echo ""
         fi
     fi

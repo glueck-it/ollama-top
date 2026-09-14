@@ -718,27 +718,32 @@ begin {
 
         # 2. NVIDIA GPU HARDWARE SENSORS
         if ($hw.GpuFound) {
-            Write-Host "  NVIDIA GPU SENSORS ($($hw.GpuName)):" -ForegroundColor White
-            
+            $deg = [string][char]0x00B0
             $gpuTempColor = "Green"
             if ($hw.GpuTemp -ge 84) { $gpuTempColor = "Red" }
             elseif ($hw.GpuTemp -ge 74) { $gpuTempColor = "Yellow" }
 
-            # GPU Compute
+            Write-Host "  NVIDIA GPU SENSORS ($($hw.GpuName)):" -ForegroundColor White
+
+            # GPU Compute + Temp
             $gpuBar = Format-Bar -Pct ($hw.GpuUtil / 100.0) -Width 18
             Write-Host "  GPU Core Load:   " -NoNewline -ForegroundColor Gray
             Write-Host "[$gpuBar] " -NoNewline -ForegroundColor Cyan
             Write-Host ("{0,3}%" -f $hw.GpuUtil) -ForegroundColor Yellow -NoNewline
             Write-Host "  | Clock: " -NoNewline -ForegroundColor Gray
-            Write-Host ("{0,4} MHz" -f $hw.GpuCoreClk) -ForegroundColor White
+            Write-Host ("{0,4} MHz" -f $hw.GpuCoreClk) -ForegroundColor White -NoNewline
+            Write-Host "  | Temp: " -NoNewline -ForegroundColor Gray
+            Write-Host ("{0}${deg} C" -f $hw.GpuTemp) -ForegroundColor $gpuTempColor
 
-            # Memory Bus
+            # Memory Bus + Power Draw
             $busBar = Format-Bar -Pct ($hw.MemBusUtil / 100.0) -Width 18
             Write-Host "  GPU Memory Bus:  " -NoNewline -ForegroundColor Gray
             Write-Host "[$busBar] " -NoNewline -ForegroundColor Cyan
             Write-Host ("{0,3}%" -f $hw.MemBusUtil) -ForegroundColor Yellow -NoNewline
             Write-Host "  | Clock: " -NoNewline -ForegroundColor Gray
-            Write-Host ("{0,4} MHz" -f $hw.GpuMemClk) -ForegroundColor White
+            Write-Host ("{0,4} MHz" -f $hw.GpuMemClk) -ForegroundColor White -NoNewline
+            Write-Host "  | Power: " -NoNewline -ForegroundColor Gray
+            Write-Host ("{0,5:N1} W" -f $hw.GpuPower) -ForegroundColor White
 
             # VRAM
             $vramPct = if ($hw.VramTot -gt 0) { $hw.VramUsed / $hw.VramTot } else { 0 }
@@ -747,26 +752,24 @@ begin {
             Write-Host "[$vramBar] " -NoNewline -ForegroundColor Magenta
             Write-Host ("{0,4:N1} / {1:N1} GB ({2:N0}%)" -f $hw.VramUsed, $hw.VramTot, ($vramPct * 100)) -ForegroundColor White
 
-            # GPU Power & Temp
-            $deg = [string][char]0x00B0
-            Write-Host "  GPU Power/Temp:  " -NoNewline -ForegroundColor Gray
-            Write-Host ("{0,5:N1} W" -f $hw.GpuPower) -ForegroundColor White -NoNewline
-            Write-Host " Power Draw  |  GPU Temp: " -NoNewline -ForegroundColor Gray
-            Write-Host ("{0}${deg} C" -f $hw.GpuTemp) -ForegroundColor $gpuTempColor
-
             Write-Host ""
         }
 
         # 3. HOST CPU & SYSTEM RAM
+        $cpuThermal = Get-CimInstance Win32_PerfFormattedData_Counters_ThermalZoneInformation -ErrorAction SilentlyContinue | Select-Object -First 1
+        $cpuTempStr = if ($cpuThermal -and $cpuThermal.Temperature -gt 273) { "$([math]::Round($cpuThermal.Temperature - 273.15, 0))${deg} C" } else { "Aktiv" }
+
         Write-Host "  HOST CPU & SYSTEM ($cpuName - $cpuCores):" -ForegroundColor White
 
-        # CPU Load
+        # CPU Load + Temp
         $cpuBar = Format-Bar -Pct ($hw.CpuUtil / 100.0) -Width 18
         Write-Host "  CPU Auslastung:  " -NoNewline -ForegroundColor Gray
         Write-Host "[$cpuBar] " -NoNewline -ForegroundColor Green
         Write-Host ("{0,3}%" -f $hw.CpuUtil) -ForegroundColor Yellow -NoNewline
         Write-Host "  | Clock: " -NoNewline -ForegroundColor Gray
-        Write-Host ("{0,4} MHz" -f $hw.CpuClk) -ForegroundColor White
+        Write-Host ("{0,4} MHz" -f $hw.CpuClk) -ForegroundColor White -NoNewline
+        Write-Host "  | Temp: " -NoNewline -ForegroundColor Gray
+        Write-Host ("{0}" -f $cpuTempStr) -ForegroundColor Cyan
 
         # Host RAM
         $ramPct = if ($hw.RamTotGb -gt 0) { $hw.RamUsedGb / $hw.RamTotGb } else { 0 }
@@ -774,13 +777,6 @@ begin {
         Write-Host "  System RAM:      " -NoNewline -ForegroundColor Gray
         Write-Host "[$ramBar] " -NoNewline -ForegroundColor Blue
         Write-Host ("{0,4:N1} / {1:N1} GB ({2:N0}%)" -f $hw.RamUsedGb, $hw.RamTotGb, ($ramPct * 100)) -ForegroundColor White
-
-        # CPU Thermal & State
-        $cpuThermal = Get-CimInstance Win32_PerfFormattedData_Counters_ThermalZoneInformation -ErrorAction SilentlyContinue | Select-Object -First 1
-        $cpuTempStr = if ($cpuThermal -and $cpuThermal.Temperature -gt 273) { "$([math]::Round($cpuThermal.Temperature - 273.15, 0))${deg} C" } else { "Aktiv" }
-        Write-Host "  CPU Status/Temp: Package Thermal: " -NoNewline -ForegroundColor Gray
-        Write-Host ("{0,-7}" -f $cpuTempStr) -ForegroundColor Cyan -NoNewline
-        Write-Host " |  Architecture: x64 ($cpuCores)" -ForegroundColor Gray
 
         # 4. INTEL NPU & ACCELERATOR SENSORS (Falls im System vorhanden)
         if ($hw.NpuFound -or $hw.IntelGpuFound) {
@@ -1027,16 +1023,22 @@ begin {
             })
         }
 
-        if ($advisories.Count -gt 0) {
+        # Filter advisories: prioritize warnings/alerts
+        $critAdvisories = $advisories | Where-Object { $_.Level -in @('WARN', 'ALERT') }
+        if ($critAdvisories -and $critAdvisories.Count -gt 0) {
             Write-Host ""
             Write-Host "  SYSTEM HEALTH & CONFIG ADVISOR:" -ForegroundColor White
             Write-Host $subSep -ForegroundColor DarkGray
-            foreach ($adv in $advisories) {
-                Write-Host "  " -NoNewline
-                Write-Host ("{0,-4}" -f $adv.Icon) -NoNewline -ForegroundColor $adv.Color
-                Write-Host ("{0}: " -f $adv.Title) -NoNewline -ForegroundColor White
-                Write-Host $adv.Msg -ForegroundColor Gray
+            foreach ($adv in $critAdvisories) {
+                # Entire line colored as requested for warnings and errors
+                Write-Host ("  {0} {1}: {2}" -f $adv.Icon, $adv.Title, $adv.Msg) -ForegroundColor $adv.Color
             }
+        } elseif ($advisories.Count -gt 0) {
+            # Compact one-liner summary when running healthy without warnings
+            Write-Host ""
+            Write-Host "  SYSTEM HEALTH: " -NoNewline -ForegroundColor White
+            $infoSummary = ($advisories | ForEach-Object { $_.Title -replace ' \(.*\)','' } | Select-Object -Unique) -join '  |  '
+            Write-Host "[*] $infoSummary" -ForegroundColor Green
         }
 
         # 9. RECENT LOG OUTPUT (Falls gepiped)
