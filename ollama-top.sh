@@ -181,9 +181,9 @@ render() {
             local g_bus_pct=$(awk -v b="$g_bus" 'BEGIN { printf "%.2f", b/100 }')
 
             echo "  ${C_WHITE}NVIDIA GPU SENSORS (${g_name}):${C_RESET}"
-            printf "  ${C_GRAY}GPU Core Load:   ${C_CYAN}[%s] ${C_YELLOW}%3d%%${C_GRAY}  | Clock: ${C_WHITE}%4d MHz${C_GRAY}  | Temp: ${C_GREEN}%d° C${C_RESET}\n" "$(format_bar "$g_util_pct" 18)" "$g_util" "$g_cclk" "$g_temp"
-            printf "  ${C_GRAY}GPU Memory Bus:  ${C_CYAN}[%s] ${C_YELLOW}%3d%%${C_GRAY}  | Clock: ${C_WHITE}%4d MHz${C_GRAY}  | Power: ${C_WHITE}%5.1f W${C_RESET}\n" "$(format_bar "$g_bus_pct" 18)" "$g_bus" "$g_mclk" "$g_pwr"
-            printf "  ${C_GRAY}VRAM Belegung:   ${C_MAGENTA}[%s] ${C_WHITE}%4.1f / %4.1f GB (${C_WHITE}%.0f%%)${C_RESET}\n" "$(format_bar "$vram_pct" 18)" "$g_vram_used" "$g_vram_tot" "$(awk -v p="$vram_pct" 'BEGIN { print p*100 }')"
+            printf "  ${C_GRAY}GPU Core Load:   ${C_CYAN}[%s] ${C_YELLOW}%3d%%${C_GRAY}  | Clock: ${C_WHITE}%5d MHz${C_GRAY}  | Temp:  ${C_GREEN}%3d° C${C_RESET}\n" "$(format_bar "$g_util_pct" 18)" "$g_util" "$g_cclk" "$g_temp"
+            printf "  ${C_GRAY}GPU Memory Bus:  ${C_CYAN}[%s] ${C_YELLOW}%3d%%${C_GRAY}  | Clock: ${C_WHITE}%5d MHz${C_GRAY}  | Power: ${C_WHITE}%6.1f W${C_RESET}\n" "$(format_bar "$g_bus_pct" 18)" "$g_bus" "$g_mclk" "$g_pwr"
+            printf "  ${C_GRAY}VRAM Belegung:   ${C_MAGENTA}[%s] ${C_WHITE}%6.1f / %6.1f GB (${C_WHITE}%3.0f%%)${C_RESET}\n" "$(format_bar "$vram_pct" 18)" "$g_vram_used" "$g_vram_tot" "$(awk -v p="$vram_pct" 'BEGIN { print p*100 }')"
             echo ""
         fi
     fi
@@ -203,8 +203,8 @@ render() {
     local ram_pct=$(awk -v u="$ram_used_kb" -v t="$ram_tot_kb" 'BEGIN { if(t>0) printf "%.2f", u/t; else print 0 }')
 
     echo "  ${C_WHITE}HOST CPU & SYSTEM (${cpu_model} - ${cpu_cores} Cores):${C_RESET}"
-    printf "  ${C_GRAY}CPU Auslastung:  ${C_GREEN}[%s] ${C_YELLOW}%3d%%${C_GRAY}  | Load 1m: ${C_WHITE}%s${C_RESET}\n" "$(format_bar "$cpu_pct_norm" 18)" "$cpu_pct" "$load_1m"
-    printf "  ${C_GRAY}System RAM:      ${C_BLUE}[%s] ${C_WHITE}%4.1f / %4.1f GB (${C_WHITE}%.0f%%)${C_RESET}\n" "$(format_bar "$ram_pct" 18)" "$ram_used_gb" "$ram_tot_gb" "$(awk -v p="$ram_pct" 'BEGIN { print p*100 }')"
+    printf "  ${C_GRAY}CPU Auslastung:  ${C_GREEN}[%s] ${C_YELLOW}%3d%%${C_GRAY}  | Load 1m: ${C_WHITE}%6.2f${C_RESET}\n" "$(format_bar "$cpu_pct_norm" 18)" "$cpu_pct" "$load_1m"
+    printf "  ${C_GRAY}System RAM:      ${C_BLUE}[%s] ${C_WHITE}%6.1f / %6.1f GB (${C_WHITE}%3.0f%%)${C_RESET}\n" "$(format_bar "$ram_pct" 18)" "$ram_used_gb" "$ram_tot_gb" "$(awk -v p="$ram_pct" 'BEGIN { print p*100 }')"
 
     # 3. Network Traffic (/proc/net/dev)
     local cur_rx=0
@@ -285,7 +285,7 @@ render() {
     if (( ${#port_counts[@]} > 0 )); then
         echo ""
         echo "  ${C_WHITE}ACTIVE SERVICES & ENDPOINTS (Database, Cache & AI):${C_RESET}"
-        printf "  ${C_GRAY}%-8s%-24s%-32s%-14s%-28s${C_RESET}\n" "PORT" "SERVICE" "ENDPOINT / TARGET" "SOCKETS" "SCOPE / NETWORK"
+        printf "  ${C_GRAY}%-8s%-24s%-32s%12s  %-28s${C_RESET}\n" "PORT" "SERVICE" "ENDPOINT / TARGET" "SOCKETS" "SCOPE / NETWORK"
         echo "${C_DGRAY}${SEP_SUB}${C_RESET}"
 
         for p in "${!port_counts[@]}"; do
@@ -296,7 +296,7 @@ render() {
             if (( p == 11434 )); then target_str+=" (Ollama 1)"; fi
             if (( p == 11435 )); then target_str+=" (Ollama 2)"; fi
 
-            printf "  ${C_YELLOW}%-8s${C_WHITE}%-24s${C_CYAN}%-32s${C_GREEN}%-14s${C_GRAY}%-28s${C_RESET}\n" \
+            printf "  ${C_YELLOW}%5d   ${C_WHITE}%-24s${C_CYAN}%-32s${C_GREEN}%12s  ${C_GRAY}%-28s${C_RESET}\n" \
                 "$p" "$svc" "$target_str" "${port_counts[$p]} aktiv" "$scope"
         done
     fi
@@ -310,13 +310,13 @@ render() {
             if (( has_ollama == 0 )); then
                 echo ""
                 echo "  ${C_WHITE}LLM ENGINES & INFERENCE SPEED:${C_RESET}"
-                printf "  ${C_GRAY}%-8s%-24s%-12s%-12s%-26s%-24s${C_RESET}\n" "PORT" "MODEL / ENGINE" "CONTEXT" "VRAM/RAM" "TOKENS IN (INPUT)" "TOKENS OUT (GEN)"
+                printf "  ${C_GRAY}%-7s%-18s%9s  %10s  %11s  %18s  %18s${C_RESET}\n" "PORT" "MODEL / ENGINE" "SLOTS" "CONTEXT" "VRAM/RAM" "TOKENS IN (INPUT)" "TOKENS OUT (GEN)"
                 echo "${C_DGRAY}${SEP_SUB}${C_RESET}"
                 has_ollama=1
             fi
             local m_name=$(echo "$ps_json" | grep -o '"name":"[^"]*"' | head -n1 | cut -d'"' -f4)
             local m_vram=$(echo "$ps_json" | grep -o '"size_vram":[0-9]*' | head -n1 | cut -d: -f2)
-            local vram_gb=$(awk -v b="${m_vram:-0}" 'BEGIN { printf "%.2f GB", b/1073741824 }')
+            local vram_gb=$(awk -v b="${m_vram:-0}" 'BEGIN { printf "%6.1f GB", b/1073741824 }')
             
             # Read speeds from server.log if available
             local p_speed="-"
@@ -325,15 +325,15 @@ render() {
             if [[ -f "$o_log" ]]; then
                 local last_eval=$(grep "eval time" "$o_log" 2>/dev/null | tail -n 2)
                 if [[ "$last_eval" =~ prompt\ eval\ time.*?([0-9.]+)\ tokens\ per\ second ]]; then
-                    p_speed="$(printf "%.0f Tok/s" "${BASH_REMATCH[1]}")"
+                    p_speed="$(printf "%7.0f Tok/s" "${BASH_REMATCH[1]}")"
                 fi
                 if [[ "$last_eval" =~ (?<!prompt\ )eval\ time.*?([0-9.]+)\ tokens\ per\ second ]]; then
-                    g_speed="$(printf "%.1f Tok/s" "${BASH_REMATCH[1]}")"
+                    g_speed="$(printf "%7.1f Tok/s" "${BASH_REMATCH[1]}")"
                 fi
             fi
 
-            printf "  ${C_YELLOW}%-8s${C_WHITE}%-24s${C_GRAY}%-12s${C_MAGENTA}%-12s${C_DYELLOW}%-26s${C_CYAN}%-24s${C_RESET}\n" \
-                "$op" "$m_name" "Active" "$vram_gb" "$p_speed" "$g_speed"
+            printf "  ${C_YELLOW}%5d  ${C_WHITE}%-18s${C_GREEN}%9s  ${C_GRAY}%10s  ${C_MAGENTA}%11s  ${C_DYELLOW}%18s  ${C_CYAN}%18s${C_RESET}\n" \
+                "$op" "$m_name" "1 slot" "Active" "$vram_gb" "$p_speed" "$g_speed"
         fi
     done
 
@@ -341,7 +341,7 @@ render() {
     local client_count=${#client_pids[@]}
     echo ""
     printf "  ${C_WHITE}ACTIVE CLIENTS & PARALLEL WORKERS: ${C_YELLOW}[%d parallel verbunden]${C_RESET}\n" "$client_count"
-    printf "  ${C_GRAY}%-9s%-16s%-32s%-14s%-18s%-17s${C_RESET}\n" "PID" "CLIENT" "TARGET ENDPOINT" "LOCAL PORT" "MEMORY" "CPU TIME"
+    printf "  ${C_GRAY}%7s  %-14s%-42s%17s  %15s${C_RESET}\n" "PID" "CLIENT" "CONNECTED SERVICES / TARGETS" "MEMORY" "CPU TIME"
     echo "${C_DGRAY}${SEP_SUB}${C_RESET}"
 
     if (( client_count == 0 )); then
@@ -351,11 +351,11 @@ render() {
             if [[ -d "/proc/$pid" ]]; then
                 local p_name=$(cut -d$'\0' -f1 "/proc/$pid/cmdline" 2>/dev/null | xargs basename 2>/dev/null || cat "/proc/$pid/comm" 2>/dev/null || echo "proc")
                 local rss_kb=$(grep -m1 "VmRSS:" "/proc/$pid/status" 2>/dev/null | awk '{print $2}' || echo "0")
-                local rss_mb=$(awk -v k="$rss_kb" 'BEGIN { printf "%.1f MB", k/1024 }')
+                local rss_mb=$(awk -v k="$rss_kb" 'BEGIN { printf "%11.1f MB", k/1024 }')
                 local target="Port ${client_pids[$pid]}"
 
-                printf "  ${C_WHITE}%-9s${C_CYAN}%-16s${C_YELLOW}%-32s${C_GRAY}%-14s${C_WHITE}%-18s${C_GRAY}%-17s${C_RESET}\n" \
-                    "$pid" "$p_name" "$target" "-" "$rss_mb" "-"
+                printf "  ${C_WHITE}%7d  ${C_CYAN}%-14s${C_YELLOW}%-42s${C_WHITE}%17s  ${C_GRAY}%15s${C_RESET}\n" \
+                    "$pid" "$p_name" "$target" "$rss_mb" "-"
             fi
         done
     fi

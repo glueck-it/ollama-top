@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Universal AI, Database, GPU & Batch Job Dashboard for Windows PowerShell.
 .DESCRIPTION
@@ -619,30 +619,36 @@ begin {
                     foreach ($m in $res.models) {
                         $vramGb = [math]::Round($m.size_vram / 1GB, 2)
                         $instances += [PSCustomObject]@{
-                            Port        = $port
-                            Model       = $m.name
-                            Slots       = $slotsStr
-                            SlotsNum    = $slots
-                            Ctx         = "$($m.context_length)"
-                            Vram        = "${vramGb} GB"
-                            VramBytes   = [int64]$m.size_vram
-                            PromptSpeed = $pSpeedStr
-                            GenSpeed    = $gSpeedStr
-                            Status      = "Active"
+                            Port           = $port
+                            Model          = $m.name
+                            Slots          = $slotsStr
+                            SlotsNum       = $slots
+                            Ctx            = "$($m.context_length)"
+                            Vram           = "${vramGb} GB"
+                            VramGb         = $vramGb
+                            VramBytes      = [int64]$m.size_vram
+                            PromptSpeed    = $pSpeedStr
+                            PromptSpeedVal = $pSpeed
+                            GenSpeed       = $gSpeedStr
+                            GenSpeedVal    = $gSpeed
+                            Status         = "Active"
                         }
                     }
                 } elseif ($res) {
                     $instances += [PSCustomObject]@{
-                        Port        = $port
-                        Model       = "(Ready / No model)"
-                        Slots       = $slotsStr
-                        SlotsNum    = $slots
-                        Ctx         = "-"
-                        Vram        = "0 GB"
-                        VramBytes   = 0L
-                        PromptSpeed = "-"
-                        GenSpeed    = "-"
-                        Status      = "Idle"
+                        Port           = $port
+                        Model          = "(Ready / No model)"
+                        Slots          = $slotsStr
+                        SlotsNum       = $slots
+                        Ctx            = "-"
+                        Vram           = "0 GB"
+                        VramGb         = 0.0
+                        VramBytes      = 0L
+                        PromptSpeed    = "-"
+                        PromptSpeedVal = 0.0
+                        GenSpeed       = "-"
+                        GenSpeedVal    = 0.0
+                        Status         = "Idle"
                     }
                 }
             } catch {}
@@ -730,9 +736,9 @@ begin {
             Write-Host "[$gpuBar] " -NoNewline -ForegroundColor Cyan
             Write-Host ("{0,3}%" -f $hw.GpuUtil) -ForegroundColor Yellow -NoNewline
             Write-Host "  | Clock: " -NoNewline -ForegroundColor Gray
-            Write-Host ("{0,4} MHz" -f $hw.GpuCoreClk) -ForegroundColor White -NoNewline
-            Write-Host "  | Temp: " -NoNewline -ForegroundColor Gray
-            Write-Host ("{0}${deg} C" -f $hw.GpuTemp) -ForegroundColor $gpuTempColor
+            Write-Host ("{0,5} MHz" -f $hw.GpuCoreClk) -ForegroundColor White -NoNewline
+            Write-Host "  | Temp:  " -NoNewline -ForegroundColor Gray
+            Write-Host ("{0,3}${deg} C" -f $hw.GpuTemp) -ForegroundColor $gpuTempColor
 
             # Memory Bus + Power Draw
             $busBar = Format-Bar -Pct ($hw.MemBusUtil / 100.0) -Width 18
@@ -740,23 +746,23 @@ begin {
             Write-Host "[$busBar] " -NoNewline -ForegroundColor Cyan
             Write-Host ("{0,3}%" -f $hw.MemBusUtil) -ForegroundColor Yellow -NoNewline
             Write-Host "  | Clock: " -NoNewline -ForegroundColor Gray
-            Write-Host ("{0,4} MHz" -f $hw.GpuMemClk) -ForegroundColor White -NoNewline
+            Write-Host ("{0,5} MHz" -f $hw.GpuMemClk) -ForegroundColor White -NoNewline
             Write-Host "  | Power: " -NoNewline -ForegroundColor Gray
-            Write-Host ("{0,5:N1} W" -f $hw.GpuPower) -ForegroundColor White
+            Write-Host ("{0,6:N1} W" -f $hw.GpuPower) -ForegroundColor White
 
             # VRAM
             $vramPct = if ($hw.VramTot -gt 0) { $hw.VramUsed / $hw.VramTot } else { 0 }
             $vramBar = Format-Bar -Pct $vramPct -Width 18
             Write-Host "  VRAM Belegung:   " -NoNewline -ForegroundColor Gray
             Write-Host "[$vramBar] " -NoNewline -ForegroundColor Magenta
-            Write-Host ("{0,4:N1} / {1:N1} GB ({2:N0}%)" -f $hw.VramUsed, $hw.VramTot, ($vramPct * 100)) -ForegroundColor White
+            Write-Host ("{0,6:N1} / {1,6:N1} GB ({2,3:N0}%)" -f $hw.VramUsed, $hw.VramTot, ($vramPct * 100)) -ForegroundColor White
 
             Write-Host ""
         }
 
         # 3. HOST CPU & SYSTEM RAM
         $cpuThermal = Get-CimInstance Win32_PerfFormattedData_Counters_ThermalZoneInformation -ErrorAction SilentlyContinue | Select-Object -First 1
-        $cpuTempStr = if ($cpuThermal -and $cpuThermal.Temperature -gt 273) { "$([math]::Round($cpuThermal.Temperature - 273.15, 0))${deg} C" } else { "Aktiv" }
+        $cpuTempStr = if ($cpuThermal -and $cpuThermal.Temperature -gt 273) { "{0,3}${deg} C" -f [math]::Round($cpuThermal.Temperature - 273.15, 0) } else { "  Aktiv" }
 
         Write-Host "  HOST CPU & SYSTEM ($cpuName - $cpuCores):" -ForegroundColor White
 
@@ -766,16 +772,16 @@ begin {
         Write-Host "[$cpuBar] " -NoNewline -ForegroundColor Green
         Write-Host ("{0,3}%" -f $hw.CpuUtil) -ForegroundColor Yellow -NoNewline
         Write-Host "  | Clock: " -NoNewline -ForegroundColor Gray
-        Write-Host ("{0,4} MHz" -f $hw.CpuClk) -ForegroundColor White -NoNewline
-        Write-Host "  | Temp: " -NoNewline -ForegroundColor Gray
-        Write-Host ("{0}" -f $cpuTempStr) -ForegroundColor Cyan
+        Write-Host ("{0,5} MHz" -f $hw.CpuClk) -ForegroundColor White -NoNewline
+        Write-Host "  | Temp:  " -NoNewline -ForegroundColor Gray
+        Write-Host ("{0,6}" -f $cpuTempStr) -ForegroundColor Cyan
 
         # Host RAM
         $ramPct = if ($hw.RamTotGb -gt 0) { $hw.RamUsedGb / $hw.RamTotGb } else { 0 }
         $ramBar = Format-Bar -Pct $ramPct -Width 18
         Write-Host "  System RAM:      " -NoNewline -ForegroundColor Gray
         Write-Host "[$ramBar] " -NoNewline -ForegroundColor Blue
-        Write-Host ("{0,4:N1} / {1:N1} GB ({2:N0}%)" -f $hw.RamUsedGb, $hw.RamTotGb, ($ramPct * 100)) -ForegroundColor White
+        Write-Host ("{0,6:N1} / {1,6:N1} GB ({2,3:N0}%)" -f $hw.RamUsedGb, $hw.RamTotGb, ($ramPct * 100)) -ForegroundColor White
 
         # 4. INTEL NPU & ACCELERATOR SENSORS (Falls im System vorhanden)
         if ($hw.NpuFound -or $hw.IntelGpuFound) {
@@ -825,15 +831,16 @@ begin {
         if ($hw.PortStats -and $hw.PortStats.Count -gt 0) {
             Write-Host ""
             Write-Host "  ACTIVE SERVICES & ENDPOINTS (Database, Cache & AI):" -ForegroundColor White
-            Write-Host ("  {0,-8}{1,-24}{2,-32}{3,-14}{4,-28}" -f "PORT", "SERVICE", "ENDPOINT / TARGET", "SOCKETS", "SCOPE / NETWORK") -ForegroundColor Gray
+            Write-Host ("  {0,-8}{1,-24}{2,-32}{3,12}  {4,-28}" -f "PORT", "SERVICE", "ENDPOINT / TARGET", "SOCKETS", "SCOPE / NETWORK") -ForegroundColor Gray
             Write-Host $subSep -ForegroundColor DarkGray
             foreach ($ps in $hw.PortStats) {
                 $sockColor = if ($ps.Sockets -gt 0) { "Green" } else { "DarkGray" }
+                $sockStr = "{0,5:N0} aktiv" -f $ps.Sockets
                 Write-Host "  " -NoNewline
-                Write-Host ("{0,-8}" -f $ps.Port) -NoNewline -ForegroundColor Yellow
+                Write-Host ("{0,5}   " -f $ps.Port) -NoNewline -ForegroundColor Yellow
                 Write-Host ("{0,-24}" -f $ps.Service) -NoNewline -ForegroundColor White
                 Write-Host ("{0,-32}" -f $ps.Target) -NoNewline -ForegroundColor Cyan
-                Write-Host ("{0,-14}" -f "$($ps.Sockets) aktiv") -NoNewline -ForegroundColor $sockColor
+                Write-Host ("{0,12}  " -f $sockStr) -NoNewline -ForegroundColor $sockColor
                 Write-Host ("{0,-28}" -f $ps.Scope) -ForegroundColor Gray
             }
         }
@@ -842,19 +849,25 @@ begin {
         if ($hw.Instances.Count -gt 0) {
             Write-Host ""
             Write-Host "  LLM ENGINES & INFERENCE SPEED:" -ForegroundColor White
-            Write-Host ("  {0,-8}{1,-20}{2,-10}{3,-10}{4,-12}{5,-25}{6,-21}" -f "PORT", "MODEL / ENGINE", "SLOTS", "CONTEXT", "VRAM/RAM", "TOKENS IN (INPUT)", "TOKENS OUT (GEN)") -ForegroundColor Gray
+            Write-Host ("  {0,-7}{1,-18}{2,9}  {3,10}  {4,11}  {5,18}  {6,18}" -f "PORT", "MODEL / ENGINE", "SLOTS", "CONTEXT", "VRAM/RAM", "TOKENS IN (INPUT)", "TOKENS OUT (GEN)") -ForegroundColor Gray
             Write-Host $subSep -ForegroundColor DarkGray
             
             foreach ($inst in $hw.Instances) {
                 $slotColor = if ($inst.SlotsNum -gt 1) { "Green" } else { "DarkGray" }
+                $slotsStr = if ($inst.SlotsNum -eq 1) { " 1 slot " } elseif ($inst.SlotsNum -gt 1) { "{0,2} slots" -f $inst.SlotsNum } else { "{0,7}" -f $inst.Slots }
+                $ctxStr = if ($inst.Ctx -match '^\d+$') { "{0,8:N0}" -f [int64]$inst.Ctx } else { "{0,8}" -f $inst.Ctx }
+                $vramStr = if ($inst.VramGb -gt 0) { "{0,6:N1} GB" -f $inst.VramGb } else { "{0,9}" -f $inst.Vram }
+                $pSpeedStr = if ($inst.PromptSpeedVal -gt 0) { "{0,7:N0} Tok/s" -f $inst.PromptSpeedVal } else { "{0,16}" -f $inst.PromptSpeed }
+                $gSpeedStr = if ($inst.GenSpeedVal -gt 0) { "{0,7:N1} Tok/s" -f $inst.GenSpeedVal } else { "{0,16}" -f $inst.GenSpeed }
+
                 Write-Host "  " -NoNewline
-                Write-Host ("{0,-8}" -f $inst.Port) -NoNewline -ForegroundColor Yellow
-                Write-Host ("{0,-20}" -f $inst.Model) -NoNewline -ForegroundColor White
-                Write-Host ("{0,-10}" -f $inst.Slots) -NoNewline -ForegroundColor $slotColor
-                Write-Host ("{0,-10}" -f $inst.Ctx) -NoNewline -ForegroundColor Gray
-                Write-Host ("{0,-12}" -f $inst.Vram) -NoNewline -ForegroundColor Magenta
-                Write-Host ("{0,-25}" -f $inst.PromptSpeed) -NoNewline -ForegroundColor DarkYellow
-                Write-Host ("{0,-21}" -f $inst.GenSpeed) -ForegroundColor Cyan
+                Write-Host ("{0,5}  " -f $inst.Port) -NoNewline -ForegroundColor Yellow
+                Write-Host ("{0,-18}" -f $inst.Model) -NoNewline -ForegroundColor White
+                Write-Host ("{0,9}  " -f $slotsStr) -NoNewline -ForegroundColor $slotColor
+                Write-Host ("{0,10}  " -f $ctxStr) -NoNewline -ForegroundColor Gray
+                Write-Host ("{0,11}  " -f $vramStr) -NoNewline -ForegroundColor Magenta
+                Write-Host ("{0,18}  " -f $pSpeedStr) -NoNewline -ForegroundColor DarkYellow
+                Write-Host ("{0,18}" -f $gSpeedStr) -ForegroundColor Cyan
             }
 
             # Speed Statistics per Port (Min / Max / Avg / Median)
@@ -868,11 +881,11 @@ begin {
                     Write-Host "  Stats $pTag" -ForegroundColor White
                     if ($pStats) {
                         Write-Host "    Tokens In:   " -NoNewline -ForegroundColor Gray
-                        Write-Host ("Min: {0,5} | Max: {1,5} | Avg: {2,5} | Med: {3,5} Tok/s  (n={4})" -f $pStats.Min, $pStats.Max, $pStats.Avg, $pStats.Median, $pStats.Count) -ForegroundColor DarkYellow
+                        Write-Host ("Min: {0,6} | Max: {1,6} | Avg: {2,6} | Med: {3,6} Tok/s  (n={4,5})" -f $pStats.Min, $pStats.Max, $pStats.Avg, $pStats.Median, $pStats.Count) -ForegroundColor DarkYellow
                     }
                     if ($gStats) {
                         Write-Host "    Tokens Out:  " -NoNewline -ForegroundColor Gray
-                        Write-Host ("Min: {0,5} | Max: {1,5} | Avg: {2,5} | Med: {3,5} Tok/s  (n={4})" -f $gStats.Min, $gStats.Max, $gStats.Avg, $gStats.Median, $gStats.Count) -ForegroundColor Cyan
+                        Write-Host ("Min: {0,6} | Max: {1,6} | Avg: {2,6} | Med: {3,6} Tok/s  (n={4,5})" -f $gStats.Min, $gStats.Max, $gStats.Avg, $gStats.Median, $gStats.Count) -ForegroundColor Cyan
                     }
                 }
             }
@@ -887,7 +900,7 @@ begin {
         Write-Host ""
         Write-Host "  ACTIVE CLIENTS & PARALLEL WORKERS: " -NoNewline -ForegroundColor White
         Write-Host "[$clientCount parallel verbunden]" -ForegroundColor $(if ($clientCount -gt 0) { "Yellow" } else { "DarkGray" })
-        Write-Host ("  {0,-8}{1,-14}{2,-48}{3,-16}{4,-16}" -f "PID", "CLIENT", "CONNECTED SERVICES / TARGETS", "MEMORY", "CPU TIME") -ForegroundColor Gray
+        Write-Host ("  {0,7}  {1,-14}{2,-42}{3,17}  {4,15}" -f "PID", "CLIENT", "CONNECTED SERVICES / TARGETS", "MEMORY", "CPU TIME") -ForegroundColor Gray
         Write-Host $subSep -ForegroundColor DarkGray
 
         if ($clientCount -eq 0) {
@@ -895,12 +908,14 @@ begin {
         } else {
             foreach ($c in $hw.Clients) {
                 Write-Host "  " -NoNewline
-                Write-Host ("{0,-8}" -f $c.PID) -NoNewline -ForegroundColor White
+                Write-Host ("{0,7}  " -f $c.PID) -NoNewline -ForegroundColor White
                 Write-Host ("{0,-14}" -f $c.Name) -NoNewline -ForegroundColor Cyan
-                $dispTarget = if ($c.Target.Length -gt 46) { $c.Target.Substring(0, 43) + "..." } else { $c.Target }
-                Write-Host ("{0,-48}" -f $dispTarget) -NoNewline -ForegroundColor Yellow
-                Write-Host ("{0,-16}" -f ("{0:N1} MB" -f $c.MemMB)) -NoNewline -ForegroundColor White
-                Write-Host ("{0,-16}" -f ("{0:N1} s" -f $c.CpuSec)) -ForegroundColor Gray
+                $dispTarget = if ($c.Target.Length -gt 40) { $c.Target.Substring(0, 37) + "..." } else { $c.Target }
+                Write-Host ("{0,-42}" -f $dispTarget) -NoNewline -ForegroundColor Yellow
+                $memStr = "{0,11:N1} MB" -f $c.MemMB
+                Write-Host ("{0,17}  " -f $memStr) -NoNewline -ForegroundColor White
+                $cpuStr = "{0,11:N1} s" -f $c.CpuSec
+                Write-Host ("{0,15}" -f $cpuStr) -ForegroundColor Gray
             }
         }
 
@@ -1108,10 +1123,12 @@ end {
             Render-Dashboard
             $sleepSw = [System.Diagnostics.Stopwatch]::StartNew()
             while ($sleepSw.ElapsedMilliseconds -lt $RefreshMs) {
-                if ([Console]::KeyAvailable) {
-                    Check-KeyboardInput
-                    Render-Dashboard
-                }
+                try {
+                    if ([Console]::KeyAvailable) {
+                        Check-KeyboardInput
+                        Render-Dashboard
+                    }
+                } catch {}
                 Start-Sleep -Milliseconds 50
             }
         }
