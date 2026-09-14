@@ -1,10 +1,15 @@
 # ollama-top (`otop`)
 
+<p align="center">
+  <img src="assets/ollama-top-icon.svg" width="96" height="96" alt="ollama-top Logo">
+</p>
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-blue)](https://github.com/glueck-it/ollama-top)
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207%2B-5391FE?logo=powershell)](https://github.com/glueck-it/ollama-top)
 [![Bash](https://img.shields.io/badge/Bash-POSIX-4EAA25?logo=gnu-bash)](https://github.com/glueck-it/ollama-top)
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-Zero-brightgreen)](https://github.com/glueck-it/ollama-top)
+
 
 **The `htop` / `nvtop` for Ollama, Local LLMs, GPUs and Enterprise Data Pipelines.**
 

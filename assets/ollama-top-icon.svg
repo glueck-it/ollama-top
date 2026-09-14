@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="ollama-top Logo">
+  <defs>
+    <linearGradient id="otop-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F172A"/>
+      <stop offset="100%" stop-color="#020617"/>
+    </linearGradient>
+    <linearGradient id="otop-term" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1E293B"/>
+      <stop offset="100%" stop-color="#0B132B"/>
+    </linearGradient>
+    <linearGradient id="otop-accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#10B981"/>
+      <stop offset="100%" stop-color="#38BDF8"/>
+    </linearGradient>
+    <linearGradient id="otop-bar1" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#059669"/>
+      <stop offset="100%" stop-color="#10B981"/>
+    </linearGradient>
+    <linearGradient id="otop-bar2" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#0284C7"/>
+      <stop offset="100%" stop-color="#38BDF8"/>
+    </linearGradient>
+  </defs>
+  <circle cx="64" cy="64" r="62" fill="url(#otop-bg)" stroke="#38BDF8" stroke-width="2.5"/>
+  <rect x="20" y="24" width="88" height="68" rx="8" fill="url(#otop-term)" stroke="#475569" stroke-width="2"/>
+  <path d="M20 32a8 8 0 0 1 8-8h72a8 8 0 0 1 8 8v8H20v-8z" fill="#0F172A"/>
+  <line x1="20" y1="40" x2="108" y2="40" stroke="#334155" stroke-width="1.5"/>
+  <circle cx="29" cy="32" r="2.8" fill="#EF4444"/>
+  <circle cx="38" cy="32" r="2.8" fill="#F59E0B"/>
+  <circle cx="47" cy="32" r="2.8" fill="#10B981"/>
+  <rect x="74" y="30.5" width="24" height="3" rx="1.5" fill="#64748B" opacity="0.6"/>
+  <path d="M29 50L37 56L29 62" fill="none" stroke="#10B981" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="42" y1="62" x2="49" y2="62" stroke="#38BDF8" stroke-width="3" stroke-linecap="round"/>
+  <rect x="56" y="53" width="5.5" height="11" rx="1.5" fill="url(#otop-bar1)"/>
+  <rect x="65" y="47" width="5.5" height="17" rx="1.5" fill="url(#otop-bar1)"/>
+  <rect x="74" y="44" width="5.5" height="20" rx="1.5" fill="url(#otop-bar2)"/>
+  <rect x="83" y="50" width="5.5" height="14" rx="1.5" fill="url(#otop-bar2)"/>
+  <rect x="92" y="45" width="5.5" height="19" rx="1.5" fill="#818CF8"/>
+  <path d="M28 78L44 78L50 71L56 83L62 74L68 79L74 78L100 78" fill="none" stroke="url(#otop-accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="94" cy="94" r="22" fill="#0B132B" stroke="#10B981" stroke-width="3"/>
+  <path d="M82 98a13 13 0 1 1 24 0" fill="none" stroke="#334155" stroke-width="3" stroke-linecap="round"/>
+  <path d="M82 98a13 13 0 0 1 18-11" fill="none" stroke="#10B981" stroke-width="3" stroke-linecap="round"/>
+  <line x1="94" y1="94" x2="102" y2="86" stroke="#38BDF8" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="94" cy="94" r="3" fill="#FFFFFF"/>
+</svg>
